@@ -96,6 +96,16 @@ def find_game_user_dir(roots: list[Path] | None = None) -> Path | None:
     return None
 
 
+def find_game_app_id(roots: list[Path] | None = None) -> str | None:
+    """Steam app id of the installed edition (Origins or Ultimate Edition)."""
+    for root in steam_roots() if roots is None else roots:
+        for library in steam_libraries(root):
+            for app_id in STEAM_APP_IDS:
+                if (library / "steamapps" / f"appmanifest_{app_id}.acf").is_file():
+                    return app_id
+    return None
+
+
 def find_game_install_dir(roots: list[Path] | None = None) -> Path | None:
     """The game's install dir (`steamapps/common/<installdir>`), if the game is installed."""
     for root in steam_roots() if roots is None else roots:

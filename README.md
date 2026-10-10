@@ -42,6 +42,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 | `c`              | check Nexus for updates                  |
 | `u`              | update the selected mod in place         |
 | `a` / `x`        | apply / unapply                          |
+| `l`              | launch the game through Steam            |
 | `h`              | hide / show the game's official DLC      |
 | `t`              | tools (LAA patch, developer console)     |
 | `delete`         | remove mod from the library              |
@@ -57,8 +58,8 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
       deployed.json         # what was written to the game dir (path + SHA-256)
     ~/.config/dao-modman/config.toml   # optional overrides, see below
 
-`config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `data_dir`,
-`downloads_dir`, `terminal`.
+`config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `game_app_id`,
+`data_dir`, `downloads_dir`, `terminal`.
 
 ## Nexus Mods
 
@@ -187,6 +188,7 @@ automatically (a rename operation in its `mod.toml`).
         chargen.py     # chargenmorphcfg.xml merging
         deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply
         laa.py         # LAA patch for the game executable
+        launch.py      # start the game through Steam
         console.py     # developer console switch, key binding, fonts.erf
       assets/laa/      # LAA-patched DAOrigins.exe
       tui/

@@ -20,6 +20,7 @@ class Config:
     dirs: Dirs
     game_user_dir: Path | None = None
     game_install_dir: Path | None = None
+    game_app_id: str | None = None  # Steam app id, for launching the game
     nexus_token: str | None = None
     terminal: str | None = None  # terminal emulator for windows opened by the nxm handler
     runtime_dir: Path | None = None  # lock and socket of the running instance; None: no IPC
@@ -56,6 +57,7 @@ def load_config() -> Config:
         dirs=dirs,
         game_user_dir=path_option("game_user_dir") or paths.find_game_user_dir(),
         game_install_dir=path_option("game_install_dir") or paths.find_game_install_dir(),
+        game_app_id=str(raw.get("game_app_id") or "") or paths.find_game_app_id(),
         nexus_token=load_token(config_dir),
         terminal=str(raw["terminal"]) if raw.get("terminal") else None,
         runtime_dir=ipc.runtime_dir(),

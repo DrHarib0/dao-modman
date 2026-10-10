@@ -14,7 +14,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Label, ProgressBar, Static
 
-from ..core import addins, console, deploy, ipc, laa, pathops
+from ..core import addins, console, deploy, ipc, laa, launch, pathops
 from ..core import archive as archives
 from ..core.config import Config
 from ..core.dazip import AddIn
@@ -70,6 +70,7 @@ class ModManApp(App[None]):
         Binding("u", "update", "Update"),
         Binding("a", "apply", "Apply"),
         Binding("x", "unapply", "Unapply"),
+        Binding("l", "launch", "Launch"),
         Binding("h", "toggle_official", "DLC"),
         Binding("t", "tools", "Tools"),
         Binding("delete", "remove", "Remove"),
@@ -514,6 +515,19 @@ class ModManApp(App[None]):
         if result.kept:
             message += f", kept {len(result.kept)} modified file(s)"
         self.notify(message)
+
+    def action_launch(self) -> None:
+        """Start the game through Steam."""
+        try:
+            launch.launch(self.config.game_app_id)
+        except launch.LaunchError as exc:
+            self.error(exc)
+            return
+        enabled = any(entry.enabled for entry in self.library.profile.mods)
+        if enabled and not self.config.dirs.deployed_file.exists():
+            self.notify("Launching the game - note: your mods are not applied", severity="warning")
+        else:
+            self.notify("Launching the game through Steam")
 
     # -- tools ------------------------------------------------------------
 

@@ -527,3 +527,45 @@ async def test_rename_mod(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
     mod = library.mods["extras-4384-5-0"]  # the id, and so the override folder, is unchanged
     assert mod.name == "Dain's Fixes - Extras"
     assert list(library.targets(mod)) == [f"{OVERRIDE}/extras-4384-5-0/a.erf"]
+
+
+async def test_launch_game(tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch) -> None:
+    from dao_modman.core import launch
+
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(launch.shutil, "which", lambda name: name if name == "steam" else None)
+    monkeypatch.setattr(launch.subprocess, "Popen", lambda argv, **_: spawned.append(argv))
+    Library(dirs).import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1"}))
+
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_app_id="47810"))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("l")
+        assert spawned == [["steam", "-applaunch", "47810"]]
+        messages = [n.message for n in app._notifications]
+        assert len(messages) == 1 and "not applied" in messages[0]
+
+        await pilot.press("a", "y")
+        await app.workers.wait_for_complete()
+        await pilot.press("l")
+        assert [n.message for n in app._notifications][-1] == "Launching the game through Steam"
+
+        app.config.game_app_id = None
+        await pilot.press("l")
+        assert len(spawned) == 2
+        assert "game_app_id" in [n.message for n in app._notifications][-1]
+
+
+def test_launch_command_and_app_id(tmp_path: Path, monkeypatch) -> None:
+    from dao_modman.core import launch, paths
+
+    monkeypatch.setattr(launch.shutil, "which", lambda name: name if name == "xdg-open" else None)
+    assert launch.command("17450") == ["xdg-open", "steam://rungameid/17450"]
+    monkeypatch.setattr(launch.shutil, "which", lambda name: None)
+    with pytest.raises(launch.LaunchError):
+        launch.command("17450")
+
+    root = tmp_path / "Steam"
+    (root / "steamapps").mkdir(parents=True)
+    assert paths.find_game_app_id([root]) is None
+    (root / "steamapps/appmanifest_47810.acf").write_text('"AppState" {}')
+    assert paths.find_game_app_id([root]) == "47810"
