@@ -27,6 +27,11 @@ def rows(app: ModManApp) -> list[list[str]]:
     return [[str(cell) for cell in table.get_row_at(i)] for i in range(table.row_count)]
 
 
+def dimmed(app: ModManApp, row: int) -> bool:
+    cells = app.query_one("#mods", DataTable).get_row_at(row)
+    return all(str(cell.style) == "dim" for cell in cells)
+
+
 async def test_toggle_move_and_group(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
     library = Library(dirs)
     library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1"}))
@@ -37,8 +42,10 @@ async def test_toggle_move_and_group(tmp_path: Path, dirs: Dirs, user_dir: Path)
         assert [row[2] for row in rows(app)] == ["one", "two"]
         assert "no API token" in str(app.query_one("#status", Static).render())
 
+        assert rows(app)[0][1] == "✓" and not dimmed(app, 0)
         await pilot.press("space")
-        assert rows(app)[0][1] == ""
+        assert rows(app)[0][1] == "" and dimmed(app, 0)
+        assert not dimmed(app, 1)  # only the disabled row is dimmed
         await pilot.press("J")
         assert [row[2] for row in rows(app)] == ["two", "one"]
         assert app.current_entry().id == "one"  # cursor follows the moved mod
@@ -241,7 +248,9 @@ async def test_official_addins_are_listed_and_can_be_hidden(
             ("Pretender", "dazip"),
         ]
         assert rows(app)[0][6] == "game" and rows(app)[2][6] == "user dir"
-        assert rows(app)[1][1] == ""  # disabled in the game
+        # enabled DLC looks like any enabled mod; only the one disabled in the game is dimmed
+        assert rows(app)[0][1] == "✓" and not dimmed(app, 0)
+        assert rows(app)[1][1] == "" and dimmed(app, 1)
         assert app.current_entry().id == "one"  # the cursor starts on the first mod
 
         # AddIn rows are read-only

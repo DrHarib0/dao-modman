@@ -105,7 +105,8 @@ Paths are relative to the game user dir and matched case-insensitively.
 
 The game's `Settings/addins.xml` already lists its own DLC, and dazip mods are registered in
 the same file. Entries that do not belong to a mod in the library are shown read-only above
-the mods (`On` reflects whether the game has them enabled); `h` hides the official ones.
+the mods; `h` hides the official ones. As for mods, `✓` in the `On` column means enabled
+(here: in the game), and disabled rows are dimmed.
 
 - **official**: the AddIn ships in the game's install dir (`Addins/<uid>/`), or carries
   `BioWare="1"`. The install dir is the reliable sign; the attribute is self-declared and only

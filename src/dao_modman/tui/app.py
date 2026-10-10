@@ -30,6 +30,7 @@ from .screens import (
     ToolsScreen,
 )
 
+ENABLED = "✓"
 COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", "Ops", "Notes")
 
 
@@ -111,6 +112,13 @@ class ModManApp(App[None]):
                 rows.append((addin, kind))
         return rows
 
+    @staticmethod
+    def _cells(enabled: bool, cells: tuple[str, ...]) -> list[Text]:
+        """Table cells with the `On` mark inserted; disabled rows are dimmed."""
+        number, *rest = cells
+        style = "" if enabled else "dim"
+        return [Text(cell, style=style) for cell in (number, ENABLED if enabled else "", *rest)]
+
     def refresh_table(self, select: str | None = None) -> None:
         table = self.query_one("#mods", DataTable)
         selected = select or (entry.id if (entry := self.current_entry()) else None)
@@ -124,18 +132,9 @@ class ModManApp(App[None]):
         addin_rows = self.addin_rows()
         self._addin_row_count = len(addin_rows)
         for addin, kind in addin_rows:
-            cells = (
-                "",
-                "x" if addin.enabled else "",
-                addin.name,
-                addin.version,
-                "",
-                kind,
-                "game" if addin.uid.casefold() in shipped else "user dir",
-                "",
-                "",
-            )
-            table.add_row(*(Text(cell, style="dim") for cell in cells), key=f"addin:{addin.uid}")
+            source = "game" if addin.uid.casefold() in shipped else "user dir"
+            cells = ("", addin.name, addin.version, "", kind, source, "", "")
+            table.add_row(*self._cells(addin.enabled, cells), key=f"addin:{addin.uid}")
         for index, (entry, mod) in enumerate(self.library.ordered(), 1):
             notes = [
                 note
@@ -145,9 +144,8 @@ class ModManApp(App[None]):
                 )
                 if active
             ]
-            table.add_row(
+            cells = (
                 str(index),
-                "x" if entry.enabled else "",
                 mod.name,
                 mod.version,
                 entry.group,
@@ -155,8 +153,8 @@ class ModManApp(App[None]):
                 f"nexus:{mod.nexus.mod_id}" if mod.nexus else "local",
                 str(len(mod.ops)) if mod.ops else "",
                 ", ".join(notes),
-                key=mod.id,
             )
+            table.add_row(*self._cells(entry.enabled, cells), key=mod.id)
         ids = [entry.id for entry in self.library.profile.mods]
         if selected in ids:
             table.move_cursor(row=self._addin_row_count + ids.index(selected))
