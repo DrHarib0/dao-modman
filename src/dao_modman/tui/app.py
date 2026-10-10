@@ -67,6 +67,7 @@ class ModManApp(App[None]):
         Binding("n", "add_nexus", "Nexus"),
         Binding("i", "import_file", "Import"),
         Binding("e", "edit_paths", "Paths"),
+        Binding("o", "open_page", "Nexus page"),
         Binding("c", "check_updates", "Check"),
         Binding("u", "update", "Update"),
         Binding("a", "apply", "Apply"),
@@ -352,6 +353,16 @@ class ModManApp(App[None]):
             self.error(exc)
             return
         self.refresh_status()
+
+    def action_open_page(self) -> None:
+        """Open the selected mod's page on Nexus in the browser."""
+        mod = self.current_mod()
+        if not mod:
+            return
+        if not mod.nexus:
+            self.notify(f"{mod.name} did not come from Nexus", markup=False)
+            return
+        self.open_url(f"https://www.nexusmods.com/{mod.nexus.game}/mods/{mod.nexus.mod_id}")
 
     def action_add_nexus(self) -> None:
         if not self.nexus:

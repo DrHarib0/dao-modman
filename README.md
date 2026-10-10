@@ -39,6 +39,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 | `n`              | add mod from Nexus (URL, id or `nxm://`) |
 | `i`              | import a local archive                   |
 | `e`              | edit path operations                     |
+| `o`              | open the mod's Nexus page in the browser |
 | `c`              | check Nexus for updates                  |
 | `u`              | update the selected mod in place         |
 | `a` / `x`        | apply / unapply                          |

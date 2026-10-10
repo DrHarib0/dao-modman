@@ -627,3 +627,23 @@ async def test_group_can_be_picked_from_existing_ones(
 
     groups = {e.id: e.group for e in Library(dirs).profile.mods}
     assert groups == {"one": "Textures", "two": "Bug fixes", "three": "Textures", "four": ""}
+
+
+async def test_open_nexus_page(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    from dao_modman.core.models import NexusInfo
+
+    library = Library(dirs)
+    library.import_archive(
+        make_zip(tmp_path / "one.zip", {"a.erf": "1"}), nexus=NexusInfo("dragonage", 1110, 5571)
+    )
+    library.import_archive(make_zip(tmp_path / "local.zip", {"b.erf": "2"}))
+
+    opened: list[str] = []
+    app = make_app(tmp_path, dirs, user_dir)
+    app.open_url = lambda url, **_: opened.append(url)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("o")
+        assert opened == ["https://www.nexusmods.com/dragonage/mods/1110"]
+        await pilot.press("down", "o")  # a local mod has no page
+        assert len(opened) == 1
+        assert "did not come from Nexus" in [n.message for n in app._notifications][-1]
