@@ -254,3 +254,12 @@ def test_identical_files_are_not_a_conflict(tmp_path: Path, library: Library) ->
     assert [f.target for f in plan.files if f.target.endswith("helper.gda")] == [
         f"{OVERRIDE}/extras/x/helper.gda"
     ]
+
+
+def test_documentation_files_are_not_a_conflict(tmp_path: Path, library: Library) -> None:
+    docs = ["ReadMe.TXT", "notes.txt", "Manual.PDF", "README", "Readme.html", "my_readme_de.rtf"]
+    for name in ("one", "two"):
+        files = {doc: f"{name} {doc}" for doc in docs}
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", {**files, "tex.dds": name}))
+    plan = deploy.build_plan(library)
+    assert plan.conflicts == {f"{OVERRIDE}/two/tex.dds": ["one", "two"]}

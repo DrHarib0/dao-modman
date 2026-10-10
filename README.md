@@ -118,7 +118,8 @@ the tree to entries whose file or folder name contains the typed text (`esc` cle
   shipping a file with the same name there conflict even at different paths, so only the copy
   of the higher-priority mod is deployed. No need for `zz_` folder prefixes or `toolsetexport`.
   Copies with identical content are not reported as a conflict, since it makes no difference
-  which one is used.
+  which one is used. Neither are documents: `*.txt`, `*.pdf` and any file with `readme` in
+  its name, ignoring case.
 - `chargenmorphcfg.xml` is the exception: when several enabled mods ship one, their entries
   are merged into a single `packages/core/override/chargenmorphcfg.xml` (what the
   CharGenMorph Compiler does) and the individual copies are not deployed.

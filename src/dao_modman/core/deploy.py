@@ -79,6 +79,15 @@ def _mod_ids(items: list[PlannedFile]) -> list[str]:
     return list(dict.fromkeys(item.mod_id for item in items))
 
 
+DOCUMENT_SUFFIXES = (".txt", ".pdf")
+
+
+def _is_documentation(target: str) -> bool:
+    """Readmes and other documents that mods ship next to their game files."""
+    name = target.rsplit("/", 1)[-1].casefold()
+    return name.endswith(DOCUMENT_SUFFIXES) or "readme" in name
+
+
 _hashes: dict[tuple[Path, int, int], str] = {}
 
 
@@ -125,6 +134,8 @@ def build_plan(library: Library) -> Plan:
         # Only the last mod's files are deployed; duplicates inside one mod are its business.
         winner = items[-1]
         plan.files += [item for item in items if item.mod_id == winner.mod_id]
+        if _is_documentation(winner.target):
+            continue  # the game never loads these, so a clash is of no interest
         if len(mod_ids := _mod_ids(items)) > 1 and not _identical(items):
             plan.conflicts[winner.target] = mod_ids
 
