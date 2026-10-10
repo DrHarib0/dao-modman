@@ -72,6 +72,10 @@ ModalScreen {
     height: 1fr;
 }
 
+#filter {
+    margin-top: 1;
+}
+
 #ops {
     height: auto;
     max-height: 8;

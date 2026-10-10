@@ -404,3 +404,101 @@ async def test_startup_link_and_second_instance(tmp_path: Path, dirs: Dirs, user
             assert second._server is None
         assert ipc.is_running(runtime)
         assert (runtime / ipc.SOCKET_NAME).exists()
+
+
+async def test_path_tree_folding_and_filter(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    Library(dirs).import_archive(
+        make_zip(
+            tmp_path / "mod.zip",
+            {
+                "a.erf": "a",
+                "docs/readme.txt": "r",
+                "docs/img/Pic.dds": "p",
+                "textures/big.dds": "b",
+            },
+        )
+    )
+    base = f"{OVERRIDE}/mod"
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("e")
+        screen = app.screen
+        tree = screen.query_one(Tree)
+
+        def nodes() -> dict[str, object]:
+            found = {}
+
+            def walk(node) -> None:
+                for child in node.children:
+                    found[child.data] = child
+                    walk(child)
+
+            walk(tree.root)
+            return found
+
+        def files() -> list[str]:
+            return sorted(p.removeprefix(base + "/") for p, n in nodes().items() if not n.children)
+
+        def folded() -> set[str]:
+            return {
+                p.removeprefix(base + "/")
+                for p, n in nodes().items()
+                if n.children and not n.is_expanded
+            }
+
+        async def go(path: str) -> None:
+            tree.move_cursor(nodes()[f"{base}/{path}"])
+            await pilot.pause()
+
+        assert folded() == set()
+
+        # left folds a folder; on a file it jumps to the folder; right unfolds
+        await go("docs")
+        await pilot.press("left")
+        assert folded() == {"docs"}
+        await pilot.press("right")
+        assert folded() == set()
+        await go("docs/img/Pic.dds")
+        await pilot.press("left")
+        assert tree.cursor_node.data == f"{base}/docs/img"
+        await pilot.press("left")
+        assert folded() == {"docs/img"}
+
+        # folds and the cursor position survive an operation
+        await go("textures/big.dds")
+        await pilot.press("r")
+        assert folded() == {"docs/img"}
+        assert tree.cursor_node.data == base  # "textures" is gone, so its parent
+        await pilot.press("u")
+        assert folded() == {"docs/img"}
+
+        # fold all / unfold all
+        await pilot.press("c")
+        assert folded() >= {"docs", "textures"}
+        await pilot.press("c")
+        assert folded() == set()
+
+        # filter by part of a file name, then of a folder name
+        await pilot.press("slash", *"DDS")
+        assert files() == ["docs/img/Pic.dds", "textures/big.dds"]
+        box = screen.query_one("#filter", Input)
+        box.value = "img"
+        await pilot.pause()
+        assert files() == ["docs/img/Pic.dds"]
+        await pilot.press("enter")
+        assert tree.has_focus
+
+        # operations work on the filtered tree
+        await go("docs/img/Pic.dds")
+        await pilot.press("r")
+        assert files() == []
+
+        # escape leaves the filter first, then the dialog
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen is screen and not box.display
+        assert files() == ["a.erf", "docs/readme.txt", "textures/big.dds"]
+        await pilot.press("s")
+        await pilot.pause()
+
+    assert Library(dirs).mods["mod"].ops == [PathOp("remove", f"{base}/docs/img/Pic.dds")]

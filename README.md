@@ -102,6 +102,10 @@ are never changed, so operations can be undone at any time.
 
 Paths are relative to the game user dir and matched case-insensitively.
 
+In the editor (`e`): `r` removes and `m` renames/moves the selected entry, `u` undoes the last
+operation. `←`/`→` fold and unfold a folder, `c` folds or unfolds everything, and `/` filters
+the tree to entries whose file or folder name contains the typed text (`esc` clears it).
+
 ## How deployment works
 
 - Target paths are relative to the game user dir: dazip `Contents/` maps 1:1; loose files go
@@ -111,6 +115,8 @@ Paths are relative to the game user dir and matched case-insensitively.
 - Below an `override` directory the game finds files by name only, in any subfolder. Two mods
   shipping a file with the same name there conflict even at different paths, so only the copy
   of the higher-priority mod is deployed. No need for `zz_` folder prefixes or `toolsetexport`.
+  Copies with identical content are not reported as a conflict, since it makes no difference
+  which one is used.
 - `chargenmorphcfg.xml` is the exception: when several enabled mods ship one, their entries
   are merged into a single `packages/core/override/chargenmorphcfg.xml` (what the
   CharGenMorph Compiler does) and the individual copies are not deployed.

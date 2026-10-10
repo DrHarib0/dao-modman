@@ -230,3 +230,27 @@ def test_single_chargenmorphcfg_is_deployed_as_is(tmp_path: Path, library: Libra
     plan = deploy.build_plan(library)
     assert [f.target for f in plan.files] == [f"{OVERRIDE}/hair/chargenmorphcfg.xml"]
     assert plan.merged == {} and plan.warnings == []
+
+
+def test_identical_files_are_not_a_conflict(tmp_path: Path, library: Library) -> None:
+    """Mods by the same author often ship the same helper file; only real differences count."""
+    library.import_archive(
+        make_zip(
+            tmp_path / "base.zip", {"a/helper.gda": "same", "b/helper.gda": "same", "t.gda": "1"}
+        )
+    )
+    library.import_archive(
+        make_zip(tmp_path / "extras.zip", {"x/helper.gda": "same", "x/t.gda": "2", "x/u.gda": "33"})
+    )
+    library.import_archive(make_zip(tmp_path / "third.zip", {"u.gda": "44"}))  # same size as u
+
+    plan = deploy.build_plan(library)
+    assert plan.conflicts == {
+        f"{OVERRIDE}/extras/x/t.gda": ["base", "extras"],
+        f"{OVERRIDE}/third/u.gda": ["extras", "third"],
+    }
+    assert plan.conflicting_mods() == {"base", "extras", "third"}
+    # deployment is unchanged: one mod's copy per name, identical or not
+    assert [f.target for f in plan.files if f.target.endswith("helper.gda")] == [
+        f"{OVERRIDE}/extras/x/helper.gda"
+    ]

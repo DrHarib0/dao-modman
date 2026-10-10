@@ -161,6 +161,29 @@ class NexusAddScreen(ModalScreen[tuple[int, int, NxmLink | None] | None]):
         self.dismiss(None)
 
 
+class PathTree(Tree[str]):
+    """A tree that folds with the arrow keys, like a file manager."""
+
+    BINDINGS = [
+        Binding("left", "fold", "Collapse", show=False),
+        Binding("right", "unfold", "Expand", show=False),
+    ]
+
+    def action_fold(self) -> None:
+        node = self.cursor_node
+        if node is None:
+            return
+        if node.allow_expand and node.is_expanded and not node.is_root:
+            node.collapse()
+        elif node.parent is not None:
+            self.move_cursor(node.parent)
+
+    def action_unfold(self) -> None:
+        node = self.cursor_node
+        if node is not None and node.allow_expand and not node.is_expanded:
+            node.expand()
+
+
 class PathOpsScreen(ModalScreen[list[PathOp] | None]):
     """Edit the remove/rename operations of a mod on a preview of its target tree."""
 
@@ -168,6 +191,8 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         Binding("r,delete", "remove", "Remove"),
         Binding("m", "rename", "Rename/move"),
         Binding("u", "undo", "Undo last"),
+        Binding("c", "toggle_all", "Collapse/expand all"),
+        Binding("slash", "filter", "Filter"),
         Binding("s", "save", "Save"),
         Binding("escape", "cancel", "Cancel"),
     ]
@@ -177,39 +202,99 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         self.mod = mod
         self.base = base
         self.ops = list(mod.ops)
+        self.filter = ""
+        self.collapsed: set[str] = set()  # folders the user folded, kept across rebuilds
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog wide tall"):
             yield Label(f"Paths of {self.mod.name}", classes="title", markup=False)
-            yield Tree("Dragon Age/", id="targets")
+            yield PathTree("Dragon Age/", id="targets")
+            yield Input(placeholder="filter by part of a file or folder name", id="filter")
             yield Static("", id="ops", markup=False)
             yield Label(
-                "[b]r[/] remove   [b]m[/] rename/move   [b]u[/] undo last   "
-                "[b]s[/] save   [b]esc[/] cancel",
+                "[b]r[/] remove   [b]m[/] rename/move   [b]u[/] undo last   [b]/[/] filter   "
+                "[b]\u2190 \u2192[/] fold   [b]c[/] fold all   [b]s[/] save   [b]esc[/] cancel",
                 classes="hint",
             )
 
     def on_mount(self) -> None:
+        self.query_one("#filter").display = False
         self.rebuild()
 
-    def rebuild(self) -> None:
-        tree = self.query_one("#targets", Tree)
+    def _matches(self, target: str) -> bool:
+        """A path is shown if the filter text occurs in one of its file or folder names."""
+        return any(self.filter in part.casefold() for part in target.split("/"))
+
+    def _remember_folds(self, tree: PathTree) -> None:
+        if self.filter:
+            return  # a filtered tree is shown fully expanded; keep the folds from before
+
+        def walk(node) -> None:
+            for child in node.children:
+                if child.allow_expand:
+                    if child.is_expanded:
+                        self.collapsed.discard(child.data)
+                    else:
+                        self.collapsed.add(child.data)
+                    walk(child)
+
+        walk(tree.root)
+
+    def rebuild(self, *, keep_folds: bool = True) -> None:
+        tree = self.query_one("#targets", PathTree)
+        selected = self._selected()
+        if keep_folds:
+            self._remember_folds(tree)
         tree.clear()
         tree.root.expand()
         nodes = {"": tree.root}
         for target in pathops.apply_ops(self.base, self.ops):
+            if self.filter and not self._matches(target):
+                continue
             parts = target.split("/")
             for depth in range(1, len(parts)):
                 path = "/".join(parts[:depth])
                 if path not in nodes:
                     parent = nodes["/".join(parts[: depth - 1])]
-                    nodes[path] = parent.add(escape(parts[depth - 1]), data=path, expand=True)
-            nodes["/".join(parts[:-1])].add_leaf(escape(parts[-1]), data=target)
+                    expand = bool(self.filter) or path not in self.collapsed
+                    nodes[path] = parent.add(escape(parts[depth - 1]), data=path, expand=expand)
+            nodes[target] = nodes["/".join(parts[:-1])].add_leaf(escape(parts[-1]), data=target)
+        # put the cursor back on the same entry, or the closest folder that still exists
+        while selected and selected not in nodes:
+            selected = selected.rpartition("/")[0]
+        if selected:
+            tree._tree_lines  # noqa: B018 - lays the new nodes out, so the cursor can go there
+            tree.move_cursor(nodes[selected])
         lines = [f"{i}. {op.describe()}" for i, op in enumerate(self.ops, 1)]
         self.query_one("#ops", Static).update("\n".join(lines) or "No operations.")
 
+    def action_toggle_all(self) -> None:
+        tree = self.query_one("#targets", PathTree)
+        self._remember_folds(tree)
+        folders = {path for path in self._folders() if path}
+        self.collapsed = set() if folders <= self.collapsed else folders
+        self.rebuild(keep_folds=False)
+
+    def _folders(self) -> set[str]:
+        targets = pathops.apply_ops(self.base, self.ops)
+        return {t.rsplit("/", i)[0] for t in targets for i in range(1, t.count("/") + 1)}
+
+    def action_filter(self) -> None:
+        box = self.query_one("#filter", Input)
+        box.display = True
+        box.focus()
+
+    @on(Input.Changed, "#filter")
+    def filter_changed(self, event: Input.Changed) -> None:
+        self.filter = event.value.strip().casefold()
+        self.rebuild()
+
+    @on(Input.Submitted, "#filter")
+    def filter_done(self) -> None:
+        self.query_one("#targets").focus()
+
     def _selected(self) -> str | None:
-        node = self.query_one("#targets", Tree).cursor_node
+        node = self.query_one("#targets", PathTree).cursor_node
         return node.data if node is not None else None
 
     def _add(self, op: PathOp) -> None:
@@ -244,4 +329,11 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         self.dismiss(self.ops)
 
     def action_cancel(self) -> None:
+        """Escape leaves the filter first, and only then the dialog."""
+        box = self.query_one("#filter", Input)
+        if box.display:
+            box.display = False
+            box.value = ""
+            self.query_one("#targets").focus()
+            return
         self.dismiss(None)

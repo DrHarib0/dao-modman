@@ -79,6 +79,26 @@ def _mod_ids(items: list[PlannedFile]) -> list[str]:
     return list(dict.fromkeys(item.mod_id for item in items))
 
 
+_hashes: dict[tuple[Path, int, int], str] = {}
+
+
+def _identical(items: list[PlannedFile]) -> bool:
+    """True if all files have the same content, so it does not matter which one is used."""
+    try:
+        stats = [(item.source, item.source.stat()) for item in items]
+        if len({stat.st_size for _source, stat in stats}) > 1:
+            return False
+        digests = set()
+        for source, stat in stats:
+            key = (source, stat.st_size, stat.st_mtime_ns)  # plans are rebuilt often
+            if key not in _hashes:
+                _hashes[key] = sha256_file(source)
+            digests.add(_hashes[key])
+    except OSError:
+        return False
+    return len(digests) == 1
+
+
 def build_plan(library: Library) -> Plan:
     plan = Plan()
     candidates: dict[tuple[str, ...], list[PlannedFile]] = {}
@@ -105,7 +125,7 @@ def build_plan(library: Library) -> Plan:
         # Only the last mod's files are deployed; duplicates inside one mod are its business.
         winner = items[-1]
         plan.files += [item for item in items if item.mod_id == winner.mod_id]
-        if len(mod_ids := _mod_ids(items)) > 1:
+        if len(mod_ids := _mod_ids(items)) > 1 and not _identical(items):
             plan.conflicts[winner.target] = mod_ids
 
     for items in chargens.values():
