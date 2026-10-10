@@ -148,3 +148,29 @@ def test_cli(
 
     config.game_install_dir = None
     assert cli.main(["console", "status"]) == 1
+
+
+def test_install_nxm_handler_warns_about_unreachable_token(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    calls: list[list[str]] = []
+    monkeypatch.setattr(cli.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "config"))
+    monkeypatch.delenv("NEXUS_API_TOKEN", raising=False)
+    monkeypatch.setattr(cli.shutil, "which", lambda _: "/usr/bin/xdg-mime")
+    monkeypatch.setattr(cli.subprocess, "run", lambda command, **_: calls.append(command))
+
+    assert cli.main(["install-nxm-handler"]) == 0
+    desktop = tmp_path / ".local/share/applications/dao-modman-nxm.desktop"
+    entry = desktop.read_text()
+    assert "x-scheme-handler/nxm" in entry
+    assert "Terminal=false" in entry  # the handler opens a terminal itself when needed
+    assert entry.count("-m dao_modman nxm %u") == 1
+    assert calls == [["xdg-mime", "default", "dao-modman-nxm.desktop", "x-scheme-handler/nxm"]]
+    assert "will not find your API token" in capsys.readouterr().out
+
+    config_dir = tmp_path / "config/dao-modman"
+    config_dir.mkdir(parents=True)
+    (config_dir / ".env").write_text("NEXUS_API_TOKEN=abc\n")
+    assert cli.main(["install-nxm-handler"]) == 0
+    assert "will not find" not in capsys.readouterr().out

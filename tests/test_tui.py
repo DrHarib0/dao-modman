@@ -4,6 +4,7 @@ import zipfile
 from pathlib import Path
 
 import httpx
+import pytest
 from textual.widgets import DataTable, Input, OptionList, Static, Tree
 
 from dao_modman.core.config import Config
@@ -315,3 +316,91 @@ async def test_tools_menu_enable_console(tmp_path: Path, dirs: Dirs, user_dir: P
         await run_last_tool(pilot)
         assert console.is_enabled(install_dir)
         assert not isinstance(app.screen, ConfirmScreen)
+
+
+async def test_link_from_the_handler_downloads_in_the_running_app(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    import asyncio
+
+    from dao_modman.core import ipc
+    from dao_modman.tui.app import DownloadRow
+
+    payload = make_zip(tmp_path / "payload.zip", {"a.erf": "a"}).read_bytes()
+    release = asyncio.Event()
+    files = [
+        {"file_id": 22, "file_name": "one.zip", "name": "One", "category_name": "OPTIONAL"},
+        {"file_id": 23, "file_name": "two.zip", "name": "Two", "category_name": "OPTIONAL"},
+    ]
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        path = request.url.path
+        if request.url.host == "cdn.example":
+            await release.wait()  # keep the downloads running until the test has looked
+            return httpx.Response(200, content=payload)
+        if path.endswith("/users/validate.json"):
+            return httpx.Response(200, json={"name": "seb", "is_premium": False})
+        if path.endswith("/mods/7.json"):
+            return httpx.Response(200, json={"mod_id": 7, "name": "My Mod"})
+        if path.endswith("/mods/7/files.json"):
+            return httpx.Response(200, json={"files": files, "file_updates": []})
+        if path.endswith("/download_link.json") and request.url.params.get("key") == "k":
+            file_id = path.split("/")[-2]
+            return httpx.Response(200, json=[{"URI": f"https://cdn.example/{file_id}.zip"}])
+        return httpx.Response(403, json={"message": "nope"})
+
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    config = Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret", runtime_dir=runtime)
+    app = ModManApp(config, transport=httpx.MockTransport(handler))
+
+    def link(file_id: int) -> str:
+        return f"nxm://dragonage/mods/7/files/{file_id}?key=k&expires=99"
+
+    async with app.run_test(size=(140, 40)) as pilot:
+        assert ipc.is_running(runtime)
+        panel = app.query_one("#downloads")
+        assert not panel.display
+
+        await asyncio.to_thread(ipc.send_link, runtime, link(22))
+        await asyncio.to_thread(ipc.send_link, runtime, link(23))
+        with pytest.raises(ipc.IpcError, match="not 'dragonage'"):
+            await asyncio.to_thread(ipc.send_link, runtime, "nxm://skyrim/mods/1/files/2")
+        for _ in range(50):  # until both downloads have reached the CDN
+            await pilot.pause(0.02)
+            if len(app.query(DownloadRow)) == 2 and all(
+                row.label.startswith("My Mod") for row in app.query(DownloadRow)
+            ):
+                break
+        assert panel.display
+        assert sorted(row.label for row in app.query(DownloadRow)) == [
+            "My Mod - One",
+            "My Mod - Two",
+        ]
+
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not panel.display and len(app.query(DownloadRow)) == 0
+        assert sorted(row[2] for row in rows(app)) == ["My Mod - One", "My Mod - Two"]
+
+    assert not ipc.is_running(runtime)
+    assert not (runtime / ipc.SOCKET_NAME).exists()
+
+
+async def test_startup_link_and_second_instance(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    from dao_modman.core import ipc
+
+    runtime = tmp_path / "run"
+    runtime.mkdir()
+    config = Config(dirs=dirs, game_user_dir=user_dir, runtime_dir=runtime)
+    # no API token: the startup link is reported instead of downloaded
+    app = ModManApp(config, links=["nxm://dragonage/mods/7/files/22"])
+    async with app.run_test(size=(140, 40)):
+        assert [n.message for n in app._notifications][0].startswith("no Nexus API token")
+        # a second instance runs, but leaves the listening to the first
+        second = ModManApp(config)
+        async with second.run_test(size=(140, 40)):
+            assert second._server is None
+        assert ipc.is_running(runtime)
+        assert (runtime / ipc.SOCKET_NAME).exists()

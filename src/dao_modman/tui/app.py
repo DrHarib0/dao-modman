@@ -11,9 +11,10 @@ from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
+from textual.containers import Horizontal, Vertical
+from textual.widgets import DataTable, Footer, Header, Label, ProgressBar, Static
 
-from ..core import addins, console, deploy, laa, pathops
+from ..core import addins, console, deploy, ipc, laa, pathops
 from ..core import archive as archives
 from ..core.config import Config
 from ..core.dazip import AddIn
@@ -21,7 +22,7 @@ from ..core.install import install_from_nexus, link_to_nexus
 from ..core.library import Library, LibraryError
 from ..core.metadata import MetadataError
 from ..core.models import Mod, PathOp, ProfileEntry
-from ..core.nexus import NexusClient, NexusError, NxmLink, newest_file_id
+from ..core.nexus import GAME, NexusClient, NexusError, NxmLink, newest_file_id, parse_nxm
 from .screens import (
     ConfirmScreen,
     NexusAddScreen,
@@ -32,6 +33,25 @@ from .screens import (
 
 ENABLED = "✓"
 COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", "Ops", "Notes")
+
+
+class DownloadRow(Horizontal):
+    """One running download: name and progress."""
+
+    def __init__(self, name: str) -> None:
+        super().__init__()
+        self.label = name
+
+    def compose(self) -> ComposeResult:
+        yield Label(self.label, markup=False)
+        yield ProgressBar()
+
+    def set_title(self, name: str) -> None:
+        self.label = name
+        self.query_one(Label).update(name)
+
+    def set_progress(self, done: int, total: int | None) -> None:
+        self.query_one(ProgressBar).update(total=total, progress=done)
 
 
 class ModManApp(App[None]):
@@ -55,7 +75,13 @@ class ModManApp(App[None]):
         Binding("q", "quit", "Quit"),
     ]
 
-    def __init__(self, config: Config, *, transport: httpx.AsyncBaseTransport | None = None):
+    def __init__(
+        self,
+        config: Config,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+        links: list[str] | None = None,
+    ) -> None:
         super().__init__()
         self.config = config
         self.library = Library(config.dirs)
@@ -66,25 +92,51 @@ class ModManApp(App[None]):
         self.updates: set[str] = set()
         self._addin_row_count = 0
         self._addins_error_shown = False
+        self._links = links or []  # nxm:// links to download right after start
+        self._lock: ipc.InstanceLock | None = None
+        self._server: asyncio.Server | None = None
 
     # -- layout -----------------------------------------------------------
 
     def compose(self) -> ComposeResult:
         yield Header()
         yield DataTable(id="mods", cursor_type="row", zebra_stripes=True)
-        yield ProgressBar(id="progress")
+        yield Vertical(id="downloads")
         yield Static("", id="status", markup=False)
         yield Footer()
 
-    def on_mount(self) -> None:
+    async def on_mount(self) -> None:
         self.query_one("#mods", DataTable).add_columns(*COLUMNS)
+        self.query_one("#downloads").display = False
         self.refresh_table()
         for error in self.library.errors:
             self.notify(error, severity="error", timeout=15, markup=False)
         if self.nexus:
             self.load_account()
+        await self.listen()
+        for url in self._links:
+            if error := self.receive_link(url):
+                self.error(error)
+
+    async def listen(self) -> None:
+        """Become the instance that the nxm:// handler forwards links to, if there is none."""
+        directory = self.config.runtime_dir
+        if directory is None:
+            return
+        lock = ipc.InstanceLock(directory)
+        if not lock.acquire():
+            return  # another instance is already listening
+        self._lock = lock
+        try:
+            self._server = await ipc.serve(directory, self.receive_link)
+        except OSError as exc:
+            self.error(f"cannot listen for nxm:// links: {exc}")
 
     async def on_unmount(self) -> None:
+        if self._server and self.config.runtime_dir:
+            await ipc.stop(self._server, self.config.runtime_dir)
+        if self._lock:
+            self._lock.release()
         if self.nexus:
             await self.nexus.aclose()
 
@@ -295,24 +347,41 @@ class ModManApp(App[None]):
         premium = bool(self.account and self.account.get("is_premium"))
         self.push_screen(NexusAddScreen(self.nexus, premium), done)
 
+    def receive_link(self, url: str) -> str | None:
+        """Start downloading an nxm:// link. Returns an error message if it is unusable."""
+        try:
+            link = parse_nxm(url)
+        except NexusError as exc:
+            return str(exc)
+        if link.game != GAME:
+            return f"that link is for {link.game!r}, not {GAME!r}"
+        if not self.nexus:
+            return "no Nexus API token: set NEXUS_API_TOKEN (see README)"
+        self.install(link.mod_id, link.file_id, link)
+        return None
+
     @work
     async def install(self, mod_id: int, file_id: int, link: NxmLink | None = None) -> None:
-        bar = self.query_one("#progress", ProgressBar)
-        bar.update(total=None, progress=0)
-        bar.display = True
-
-        def progress(done: int, total: int | None) -> None:
-            bar.update(total=total, progress=done)
-
+        panel = self.query_one("#downloads")
+        row = DownloadRow(f"Nexus mod {mod_id}")
+        await panel.mount(row)
+        panel.display = True
         try:
             mod, updated = await install_from_nexus(
-                self.nexus, self.library, mod_id, file_id, link=link, progress=progress
+                self.nexus,
+                self.library,
+                mod_id,
+                file_id,
+                link=link,
+                progress=row.set_progress,
+                started=row.set_title,
             )
         except (NexusError, LibraryError, OSError) as exc:
             self.error(exc)
             return
         finally:
-            bar.display = False
+            await row.remove()
+            panel.display = bool(panel.children)
         self.updates.discard(mod.id)
         self.refresh_table(select=mod.id)
         self.notify(f"{'Updated' if updated else 'Installed'} {mod.name}", markup=False)

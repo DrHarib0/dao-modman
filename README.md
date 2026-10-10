@@ -18,7 +18,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 ## Run
 
     uv run dao-modman                      # TUI
-    uv run dao-modman nxm 'nxm://...'      # handle a "Mod Manager Download" link
+    uv run dao-modman nxm 'nxm://...'      # hand a "Mod Manager Download" link to the TUI
     uv run dao-modman install-nxm-handler  # register as nxm:// handler
     uv run dao-modman laa status|patch|restore   # Large Address Aware patch, see below
     uv run dao-modman console status|enable|disable   # developer console, see below
@@ -57,7 +57,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
     ~/.config/dao-modman/config.toml   # optional overrides, see below
 
 `config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `data_dir`,
-`downloads_dir`.
+`downloads_dir`, `terminal`.
 
 ## Nexus Mods
 
@@ -67,6 +67,22 @@ on the website (Nexus API restriction): paste the `nxm://` link into the add dia
 register dao-modman as the handler. Mod and file ids are stored in `mod.toml`, which enables
 update checks. A file that supersedes an installed one replaces it in place, so load order and
 path operations carry over. Manually imported archives are looked up on Nexus by MD5.
+
+### The nxm:// handler
+
+After `dao-modman install-nxm-handler`, clicking "Mod Manager Download" in the browser hands
+the link to the running dao-modman, which shows the download in a panel above the status
+line; several downloads can run side by side. If dao-modman is not running, the handler opens
+it in a new terminal window and starts the download there.
+
+The running instance listens on a Unix socket in `$XDG_RUNTIME_DIR`, accessible only to your
+user. The handler runs outside the project directory, so the API token must be in the
+environment or in `~/.config/dao-modman/.env`.
+
+Which terminal is opened: `terminal` in `config.toml` (a command, e.g. `terminal = "kitty"`
+or `"kitty --class dao-modman"`), else `$TERMINAL`, else `xdg-terminal-exec`, else KDE's
+configured terminal, else the first one found of konsole, gnome-terminal, kitty, alacritty,
+foot, wezterm, xterm.
 
 ## Path operations
 
@@ -157,6 +173,8 @@ automatically (a rename operation in its `mod.toml`).
         library.py     # import archives into mods/<id>/
         pathops.py     # remove/rename resolution
         nexus.py       # Nexus API client, nxm:// links, downloads
+        ipc.py         # socket the nxm:// handler uses to reach the running instance
+        terminal.py    # find a terminal emulator to open a new instance in
         install.py     # download + import, in-place updates, MD5 lookup
         addins.py      # Settings/AddIns.xml
         chargen.py     # chargenmorphcfg.xml merging

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from collections.abc import Callable
 
 from . import console
 from .library import Library
@@ -45,6 +46,7 @@ async def install_from_nexus(
     *,
     link: NxmLink | None = None,
     progress: Progress | None = None,
+    started: Callable[[str], None] | None = None,
 ) -> tuple[Mod, bool]:
     """Download and import a Nexus file. Returns `(mod, updated_in_place)`.
 
@@ -56,6 +58,8 @@ async def install_from_nexus(
     file_info = next((f for f in listing.get("files", []) if f.get("file_id") == file_id), None)
     if file_info is None:
         raise NexusError(f"file {file_id} not found for mod {mod_id}")
+    if started:
+        started(display_name(mod_info, file_info))
     archive = await fetch_archive(
         client, library.dirs.downloads, mod_id, file_info, link=link, progress=progress
     )

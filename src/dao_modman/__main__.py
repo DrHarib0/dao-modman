@@ -3,60 +3,61 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
+import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from .core import console, laa, nexus
-from .core.config import Config, load_config
-from .core.install import install_from_nexus
-from .core.library import Library, LibraryError
-from .core.nexus import NexusClient, NexusError
+from .core import console, ipc, laa, nexus, paths, terminal
+from .core.config import TOKEN_VAR, Config, load_config, load_token
+from .core.library import Library
+from .core.nexus import NexusError
 
 DESKTOP_FILE = "dao-modman-nxm.desktop"
 DESKTOP_ENTRY = """[Desktop Entry]
 Type=Application
 Name=dao-modman (nxm links)
-Exec="{python}" -m dao_modman nxm --wait %u
-Terminal=true
+Exec="{python}" -m dao_modman nxm %u
+Terminal=false
 NoDisplay=true
 MimeType=x-scheme-handler/nxm;
 """
 
 
-async def _install_link(config: Config, url: str) -> str:
-    link = nexus.parse_nxm(url)
-    if link.game != nexus.GAME:
-        raise NexusError(f"that link is for {link.game!r}, not {nexus.GAME!r}")
-    if not config.nexus_token:
-        raise NexusError("no Nexus API token: set NEXUS_API_TOKEN (see README)")
+def _report(message: str) -> None:
+    """The handler has no terminal of its own, so errors also go to the desktop."""
+    print(f"error: {message}", file=sys.stderr)
+    if shutil.which("notify-send"):
+        subprocess.run(["notify-send", "--app-name=dao-modman", "dao-modman", message], check=False)
 
-    def progress(done: int, total: int | None) -> None:
-        of_total = f" / {total / 1e6:.1f}" if total else ""
-        print(f"\r{done / 1e6:.1f}{of_total} MB", end="", flush=True)
 
-    client = NexusClient(config.nexus_token)
+def _forward(config: Config, url: str) -> bool:
+    """Hand the link to the running instance, if there is one."""
+    if config.runtime_dir is None or not ipc.is_running(config.runtime_dir):
+        return False
+    ipc.send_link(config.runtime_dir, url)
+    return True
+
+
+def cmd_nxm(url: str) -> int:
+    """Pass a link to the running instance, or start one in a new terminal window."""
+    config = load_config()
     try:
-        mod, updated = await install_from_nexus(
-            client, Library(config.dirs), link.mod_id, link.file_id, link=link, progress=progress
-        )
-    finally:
-        await client.aclose()
-    return f"\n{'Updated' if updated else 'Installed'} {mod.name} ({mod.id})"
-
-
-def cmd_nxm(url: str, wait: bool) -> int:
-    status = 0
-    try:
-        print(asyncio.run(_install_link(load_config(), url)))
-    except (NexusError, LibraryError, OSError) as exc:
-        print(f"\nerror: {exc}", file=sys.stderr)
-        status = 1
-    if wait:
-        input("Press enter to close ")
-    return status
+        nexus.parse_nxm(url)
+        if not _forward(config, url):
+            argv = [sys.executable, "-m", "dao_modman", "--nxm", url]
+            subprocess.Popen(
+                terminal.command(config.terminal, argv),
+                start_new_session=True,
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+    except (NexusError, ipc.IpcError, terminal.TerminalError, OSError) as exc:
+        _report(str(exc))
+        return 1
+    return 0
 
 
 def cmd_install_nxm_handler() -> int:
@@ -68,8 +69,18 @@ def cmd_install_nxm_handler() -> int:
     if not shutil.which("xdg-mime"):
         print("xdg-mime not found: register the nxm:// handler manually", file=sys.stderr)
         return 1
-    subprocess.run(["xdg-mime", "default", DESKTOP_FILE, "x-scheme-handler/nxm"], check=True)
+    # On KDE, xdg-mime calls qtpaths, which some distros keep outside PATH.
+    env = {**os.environ, "PATH": f"{os.environ.get('PATH', '')}:/usr/lib/qt6/bin"}
+    command = ["xdg-mime", "default", DESKTOP_FILE, "x-scheme-handler/nxm"]
+    subprocess.run(command, check=True, env=env)
     print("registered as handler for nxm:// links")
+    # The browser starts the handler outside the project dir, where ./.env is not found.
+    config_dir = paths.config_dir()
+    if not os.environ.get(TOKEN_VAR) and not load_token(config_dir, cwd=config_dir):
+        print(
+            f"note: the handler will not find your API token: put {TOKEN_VAR}=... "
+            f"into {config_dir / '.env'}"
+        )
     return 0
 
 
@@ -126,9 +137,9 @@ def cmd_console(action: str) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dao-modman", description=__doc__)
     commands = parser.add_subparsers(dest="command")
-    nxm = commands.add_parser("nxm", help="download and import a 'Mod Manager Download' link")
+    parser.add_argument("--nxm", metavar="URL", help="start the TUI and download this link")
+    nxm = commands.add_parser("nxm", help="hand a 'Mod Manager Download' link to the TUI")
     nxm.add_argument("url")
-    nxm.add_argument("--wait", action="store_true", help="wait for enter before exiting")
     commands.add_parser("install-nxm-handler", help="register dao-modman for nxm:// links")
     laa_cmd = commands.add_parser("laa", help="Large Address Aware patch for the game exe")
     laa_cmd.add_argument("action", choices=["status", "patch", "restore"])
@@ -140,7 +151,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "nxm":
-        return cmd_nxm(args.url, args.wait)
+        return cmd_nxm(args.url)
     if args.command == "console":
         return cmd_console(args.action)
     if args.command == "laa":
@@ -148,9 +159,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "install-nxm-handler":
         return cmd_install_nxm_handler()
 
+    config = load_config()
+    if args.nxm:
+        # Lost the race against another instance that is starting: let that one handle it.
+        try:
+            if _forward(config, args.nxm):
+                return 0
+        except ipc.IpcError as exc:
+            _report(str(exc))
+            return 1
+
     from .tui.app import ModManApp
 
-    ModManApp(load_config()).run()
+    ModManApp(config, links=[args.nxm] if args.nxm else []).run()
     return 0
 
 
