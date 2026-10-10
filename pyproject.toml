@@ -1,0 +1,37 @@
+[project]
+name = "dao-modman"
+version = "0.1.0"
+description = "Terminal mod manager for Dragon Age: Origins on Steam/Proton"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "textual>=1.0",
+    "httpx>=0.27",
+    "tomli-w>=1.0",
+    "python-dotenv>=1.0",
+    "py7zr>=0.21",
+]
+
+[project.scripts]
+dao-modman = "dao_modman.__main__:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "textual-dev>=1.5"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/dao_modman"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"

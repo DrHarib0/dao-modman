@@ -1,0 +1,65 @@
+#mods {
+    height: 1fr;
+}
+
+#progress {
+    display: none;
+    height: 1;
+    padding: 0 1;
+}
+
+#status {
+    height: 1;
+    padding: 0 1;
+    background: $panel;
+    color: $text-muted;
+}
+
+ModalScreen {
+    align: center middle;
+}
+
+.dialog {
+    width: 70;
+    max-width: 95%;
+    height: auto;
+    max-height: 90%;
+    padding: 1 2;
+    border: round $primary;
+    background: $surface;
+}
+
+.dialog.wide {
+    width: 110;
+}
+
+.dialog.tall {
+    height: 90%;
+}
+
+.dialog .title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.dialog .hint {
+    color: $text-muted;
+    margin-top: 1;
+}
+
+#files {
+    height: auto;
+    max-height: 16;
+    margin-top: 1;
+}
+
+#targets {
+    height: 1fr;
+}
+
+#ops {
+    height: auto;
+    max-height: 8;
+    margin-top: 1;
+    color: $text-muted;
+}
