@@ -502,3 +502,28 @@ async def test_path_tree_folding_and_filter(tmp_path: Path, dirs: Dirs, user_dir
         await pilot.pause()
 
     assert Library(dirs).mods["mod"].ops == [PathOp("remove", f"{base}/docs/img/Pic.dds")]
+
+
+async def test_rename_mod(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    Library(dirs).import_archive(make_zip(tmp_path / "Extras-4384-5-0.zip", {"a.erf": "1"}))
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("r")
+        box = app.screen.query_one(Input)
+        assert box.value == "Extras-4384-5-0"
+        box.value = "Dain's Fixes - Extras"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert rows(app)[0][2] == "Dain's Fixes - Extras"
+
+        await pilot.press("r")  # an empty name or escape changes nothing
+        app.screen.query_one(Input).value = "  "
+        await pilot.press("enter")
+        await pilot.press("r", "escape")
+        await pilot.pause()
+        assert rows(app)[0][2] == "Dain's Fixes - Extras"
+
+    library = Library(dirs)
+    mod = library.mods["extras-4384-5-0"]  # the id, and so the override folder, is unchanged
+    assert mod.name == "Dain's Fixes - Extras"
+    assert list(library.targets(mod)) == [f"{OVERRIDE}/extras-4384-5-0/a.erf"]

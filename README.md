@@ -34,6 +34,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 | ---------------- | ---------------------------------------- |
 | `space`          | enable / disable mod                     |
 | `K` / `J`        | move mod up / down in the load order     |
+| `r`              | rename mod (display name only)           |
 | `g`              | set group                                |
 | `n`              | add mod from Nexus (URL, id or `nxm://`) |
 | `i`              | import a local archive                   |

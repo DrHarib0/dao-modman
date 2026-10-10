@@ -61,6 +61,7 @@ class ModManApp(App[None]):
         Binding("space", "toggle", "On/off"),
         Binding("K,ctrl+up", "move(-1)", "Up"),
         Binding("J,ctrl+down", "move(1)", "Down"),
+        Binding("r", "rename", "Rename"),
         Binding("g", "group", "Group"),
         Binding("n", "add_nexus", "Nexus"),
         Binding("i", "import_file", "Import"),
@@ -262,6 +263,20 @@ class ModManApp(App[None]):
         if entry and self.library.profile.move(entry.id, delta):
             self.library.save_profile()
             self.refresh_table(select=entry.id)
+
+    def action_rename(self) -> None:
+        """Change a mod's display name. Its id, and with it its folder names, stay the same."""
+        mod = self.current_mod()
+        if not mod:
+            return
+
+        def done(name: str | None) -> None:
+            if name and name != mod.name:
+                mod.name = name
+                self.library.save_mod(mod)
+                self.refresh_table()
+
+        self.push_screen(TextPromptScreen("Rename mod", mod.name), done)
 
     def action_group(self) -> None:
         entry = self.current_entry()
