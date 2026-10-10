@@ -20,6 +20,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
     uv run dao-modman                      # TUI
     uv run dao-modman nxm 'nxm://...'      # handle a "Mod Manager Download" link
     uv run dao-modman install-nxm-handler  # register as nxm:// handler
+    uv run dao-modman laa status|patch|restore   # Large Address Aware patch, see below
 
     uv run pytest
     uv run ruff check . && uv run ruff format .
@@ -39,6 +40,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 | `c`              | check Nexus for updates                  |
 | `u`              | update the selected mod in place         |
 | `a` / `x`        | apply / unapply                          |
+| `t`              | tools (LAA patch)                        |
 | `delete`         | remove mod from the library              |
 
 ## Data
@@ -52,7 +54,8 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
       deployed.json         # what was written to the game dir (path + SHA-256)
     ~/.config/dao-modman/config.toml   # optional overrides, see below
 
-`config.toml` keys (all optional): `game_user_dir`, `data_dir`, `downloads_dir`.
+`config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `data_dir`,
+`downloads_dir`.
 
 ## Nexus Mods
 
@@ -87,15 +90,30 @@ Paths are relative to the game user dir and matched case-insensitively.
   to `packages/core/override/<mod-id>/`. Path operations are then applied on top.
 - An archive that wraps a single `.dazip` is unwrapped on import.
 - Load order: bottom of the list = highest priority; on identical paths it wins.
+- Below an `override` directory the game finds files by name only, in any subfolder. Two mods
+  shipping a file with the same name there conflict even at different paths, so only the copy
+  of the higher-priority mod is deployed. No need for `zz_` folder prefixes or `toolsetexport`.
+- `chargenmorphcfg.xml` is the exception: when several enabled mods ship one, their entries
+  are merged into a single `packages/core/override/chargenmorphcfg.xml` (what the
+  CharGenMorph Compiler does) and the individual copies are not deployed.
 - Every deployed file is recorded with its SHA-256. Unapply deletes only files that are still
   unchanged; files that existed before or were edited are left alone.
 - dazip AddIns are added to / removed from `Settings/AddIns.xml`.
+
+## Large Address Aware (LAA) patch
+
+A heavily modded game runs out of memory unless the executable is Large Address Aware. The
+Steam executable cannot simply be flagged in place, so a patched `DAOrigins.exe` is kept in
+`src/dao_modman/assets/laa/`. `dao-modman laa patch` (or Tools in the TUI) copies it over
+`bin_ship/DAOrigins.exe` in the game's install dir and keeps the original next to it as
+`DAOrigins.exe.pre-laa`; `laa restore` puts it back. Steam's "verify integrity of game files"
+also restores the original, after which the patch has to be applied again.
 
 ## Layout
 
     src/dao_modman/
       core/            # no UI code - testable on its own
-        paths.py       # Steam library / Proton prefix / XDG dirs
+        paths.py       # Steam library / game install dir / Proton prefix / XDG dirs
         config.py      # config.toml, API token
         models.py      # Mod, PathOp, Profile
         metadata.py    # mod.toml / profile.toml
@@ -106,8 +124,17 @@ Paths are relative to the game user dir and matched case-insensitively.
         nexus.py       # Nexus API client, nxm:// links, downloads
         install.py     # download + import, in-place updates, MD5 lookup
         addins.py      # Settings/AddIns.xml
-        deploy.py      # plan (ops, priority, conflicts), apply, unapply
+        chargen.py     # chargenmorphcfg.xml merging
+        deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply
+        laa.py         # LAA patch for the game executable
+      assets/laa/      # LAA-patched DAOrigins.exe
       tui/
         app.py, app.tcss
         screens.py     # modal dialogs
     tests/
+
+## Further reading
+
+- [Comprehensive Modding Guide for DA:O (Ultimate Edition)](https://steamcommunity.com/sharedfiles/filedetails/?id=3279785773)
+  by psousa: general modding advice (override priority, conflicts, `toolsetexport`,
+  `chargenmorphcfg.xml`) and a curated mod list.

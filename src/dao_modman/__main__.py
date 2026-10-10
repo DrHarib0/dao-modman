@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .core import nexus
+from .core import laa, nexus
 from .core.config import Config, load_config
 from .core.install import install_from_nexus
 from .core.library import Library, LibraryError
@@ -73,6 +73,29 @@ def cmd_install_nxm_handler() -> int:
     return 0
 
 
+def cmd_laa(action: str, exe: Path | None) -> int:
+    install_dir = load_config().game_install_dir
+    if not install_dir:
+        print(
+            "error: game install dir not found: set game_install_dir in config.toml",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        if action == "patch":
+            backup = laa.patch(install_dir, exe)
+            print(f"patched {laa.game_exe(install_dir)}\noriginal saved as {backup}")
+        elif action == "restore":
+            print(f"restored {laa.restore(install_dir)}")
+        else:
+            print(f"{laa.game_exe(install_dir)}: {laa.status(install_dir)}")
+            print(f"bundled LAA executable: {laa.bundled_exe() or 'missing'}")
+    except laa.LaaError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dao-modman", description=__doc__)
     commands = parser.add_subparsers(dest="command")
@@ -80,10 +103,17 @@ def main(argv: list[str] | None = None) -> int:
     nxm.add_argument("url")
     nxm.add_argument("--wait", action="store_true", help="wait for enter before exiting")
     commands.add_parser("install-nxm-handler", help="register dao-modman for nxm:// links")
+    laa_cmd = commands.add_parser("laa", help="Large Address Aware patch for the game exe")
+    laa_cmd.add_argument("action", choices=["status", "patch", "restore"])
+    laa_cmd.add_argument(
+        "--exe", type=Path, help="patched executable to use instead of the bundled"
+    )
     args = parser.parse_args(argv)
 
     if args.command == "nxm":
         return cmd_nxm(args.url, args.wait)
+    if args.command == "laa":
+        return cmd_laa(args.action, args.exe)
     if args.command == "install-nxm-handler":
         return cmd_install_nxm_handler()
 

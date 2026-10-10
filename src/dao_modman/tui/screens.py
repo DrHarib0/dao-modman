@@ -60,6 +60,29 @@ class TextPromptScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class ToolsScreen(ModalScreen[str | None]):
+    """A menu of one-off tools. Result: the id of the chosen tool."""
+
+    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+
+    def __init__(self, tools: list[tuple[str, str]]) -> None:
+        super().__init__()
+        self.tools = tools
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Tools", classes="title")
+            yield OptionList(*(Option(escape(label), id=tool) for tool, label in self.tools))
+            yield Label("[b]enter[/] run   [b]esc[/] cancel", classes="hint")
+
+    @on(OptionList.OptionSelected)
+    def select(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class NexusAddScreen(ModalScreen[tuple[int, int, NxmLink | None] | None]):
     """Pick a file of a Nexus mod. Result: `(mod_id, file_id, nxm link or None)`."""
 

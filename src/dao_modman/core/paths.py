@@ -12,6 +12,7 @@ APP_NAME = "dao-modman"
 STEAM_APP_IDS = ("17450", "47810")
 USER_DIR_IN_PREFIX = Path("pfx/drive_c/users/steamuser/Documents/BioWare/Dragon Age")
 
+_ACF_INSTALLDIR = re.compile(r'"installdir"\s+"((?:[^"\\]|\\.)*)"')
 _VDF_PATH = re.compile(r'"path"\s+"((?:[^"\\]|\\.)*)"')
 
 
@@ -92,6 +93,21 @@ def find_game_user_dir(roots: list[Path] | None = None) -> Path | None:
                 user_dir = library / "steamapps/compatdata" / app_id / USER_DIR_IN_PREFIX
                 if user_dir.is_dir():
                     return user_dir
+    return None
+
+
+def find_game_install_dir(roots: list[Path] | None = None) -> Path | None:
+    """The game's install dir (`steamapps/common/<installdir>`), if the game is installed."""
+    for root in steam_roots() if roots is None else roots:
+        for library in steam_libraries(root):
+            for app_id in STEAM_APP_IDS:
+                manifest = library / "steamapps" / f"appmanifest_{app_id}.acf"
+                try:
+                    match = _ACF_INSTALLDIR.search(manifest.read_text("utf-8", "replace"))
+                except OSError:
+                    continue
+                if match and (install_dir := library / "steamapps/common" / match[1]).is_dir():
+                    return install_dir
     return None
 
 

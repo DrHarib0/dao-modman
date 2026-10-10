@@ -19,6 +19,7 @@ TOKEN_VAR = "NEXUS_API_TOKEN"
 class Config:
     dirs: Dirs
     game_user_dir: Path | None = None
+    game_install_dir: Path | None = None
     nexus_token: str | None = None
 
 
@@ -52,5 +53,6 @@ def load_config() -> Config:
     return Config(
         dirs=dirs,
         game_user_dir=path_option("game_user_dir") or paths.find_game_user_dir(),
+        game_install_dir=path_option("game_install_dir") or paths.find_game_install_dir(),
         nexus_token=load_token(config_dir),
     )

@@ -183,3 +183,30 @@ async def test_add_from_nexus(tmp_path: Path, dirs: Dirs, user_dir: Path) -> Non
     mod = Library(dirs).mods["my-mod"]
     assert (mod.nexus.mod_id, mod.nexus.file_id) == (7, 22)
     assert (dirs.downloads / "My Mod-7.zip").is_file()
+
+
+async def test_tools_menu_laa_patch_and_restore(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch
+) -> None:
+    from dao_modman.core import laa
+
+    from .test_laa import make_exe
+
+    install_dir = tmp_path / "game"
+    exe = make_exe(install_dir / "bin_ship/DAOrigins.exe", large_address_aware=False)
+    bundled = make_exe(tmp_path / "bundled.exe", large_address_aware=True)
+    monkeypatch.setattr(laa, "bundled_exe", lambda: bundled)
+
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("t")
+        assert app.screen.query_one(OptionList).option_count == 2
+        await pilot.press("enter")  # first entry: apply the patch
+        await pilot.pause()
+        assert laa.is_laa(exe)
+
+        await pilot.press("t")
+        assert app.screen.query_one(OptionList).option_count == 1  # only restore is left
+        await pilot.press("enter")
+        await pilot.pause()
+        assert not laa.is_laa(exe)

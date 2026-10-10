@@ -142,3 +142,91 @@ def test_apply_requires_user_dir(tmp_path: Path, library: Library) -> None:
 
 def test_unapply_without_record_is_a_noop(library: Library) -> None:
     assert deploy.unapply(library.dirs.deployed_file).removed == 0
+
+
+def test_override_conflicts_are_by_file_name(
+    tmp_path: Path, library: Library, user_dir: Path
+) -> None:
+    """The game finds override resources by name, whatever subfolder they are in."""
+    library.import_archive(
+        make_zip(tmp_path / "low.zip", {"textures/Robe.dds": "low", "only_low.dds": "l"})
+    )
+    library.import_archive(
+        make_zip(tmp_path / "high.zip", {"a/robe.dds": "high-a", "b/robe.dds": "high-b"})
+    )
+
+    plan = deploy.build_plan(library)
+    assert {f.target: f.mod_id for f in plan.files} == {
+        f"{OVERRIDE}/high/a/robe.dds": "high",  # duplicates inside one mod are kept
+        f"{OVERRIDE}/high/b/robe.dds": "high",
+        f"{OVERRIDE}/low/only_low.dds": "low",
+    }
+    assert plan.conflicts == {f"{OVERRIDE}/high/b/robe.dds": ["low", "high"]}
+
+    library.profile.move("low", 1)  # low is now last, so it wins
+    plan = deploy.build_plan(library)
+    assert sorted(f.target for f in plan.files) == [
+        f"{OVERRIDE}/low/only_low.dds",
+        f"{OVERRIDE}/low/textures/Robe.dds",
+    ]
+    deploy.apply(plan, user_dir, library.dirs.deployed_file)
+    assert tree(user_dir) == [f"{OVERRIDE}/low/only_low.dds", f"{OVERRIDE}/low/textures/Robe.dds"]
+
+
+def test_same_name_outside_override_is_not_a_conflict(tmp_path: Path, library: Library) -> None:
+    for name in ("one", "two"):
+        mod = library.import_archive(make_zip(tmp_path / f"{name}.zip", {"readme.txt": name}))
+        mod.ops = [PathOp("rename", f"{OVERRIDE}/{name}", f"docs/{name}")]
+    plan = deploy.build_plan(library)
+    assert [f.target for f in plan.files] == ["docs/one/readme.txt", "docs/two/readme.txt"]
+    assert plan.conflicts == {}
+
+
+def chargen_xml(hairs: list[str], colors: list[str]) -> str:
+    hair = "".join(f'<resource name="{name}" cut="1" />' for name in hairs)
+    color = "".join(f'<resource name="{name}" />' for name in colors)
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n<morph_config><hairs><human_male>'
+        f"{hair}</human_male></hairs><hair_colors>{color}</hair_colors></morph_config>"
+    )
+
+
+def chargen_names(path: Path, section: str) -> list[str]:
+    root = ET.parse(path).getroot()
+    return [resource.get("name") for resource in root.find(section).iter("resource")]
+
+
+def test_chargenmorphcfg_is_merged(tmp_path: Path, library: Library, user_dir: Path) -> None:
+    library.import_archive(
+        make_zip(
+            tmp_path / "hair.zip",
+            {"chargenmorphcfg.xml": chargen_xml(["base", "hair_a"], ["black"]), "hair_a.mmh": "a"},
+        )
+    )
+    library.import_archive(
+        make_zip(
+            tmp_path / "colors.zip",
+            {"cfg/ChargenMorphCfg.xml": chargen_xml(["BASE", "hair_b"], ["black", "pink"])},
+        )
+    )
+    library.import_archive(make_zip(tmp_path / "broken.zip", {"chargenmorphcfg.xml": "<oops"}))
+
+    plan = deploy.build_plan(library)
+    merged = f"{OVERRIDE}/chargenmorphcfg.xml"
+    assert plan.merged == {merged: ["hair", "colors", "broken"]}
+    assert plan.conflicts == {}
+    assert len(plan.warnings) == 1 and plan.warnings[0].startswith("broken:")
+    assert [f.target for f in plan.files] == [merged, f"{OVERRIDE}/hair/hair_a.mmh"]
+
+    deploy.apply(plan, user_dir, library.dirs.deployed_file)
+    assert chargen_names(user_dir / merged, "hairs") == ["base", "hair_a", "hair_b"]
+    assert chargen_names(user_dir / merged, "hair_colors") == ["black", "pink"]
+    deploy.unapply(library.dirs.deployed_file)
+    assert tree(user_dir) == []
+
+
+def test_single_chargenmorphcfg_is_deployed_as_is(tmp_path: Path, library: Library) -> None:
+    library.import_archive(make_zip(tmp_path / "hair.zip", {"chargenmorphcfg.xml": "<oops"}))
+    plan = deploy.build_plan(library)
+    assert [f.target for f in plan.files] == [f"{OVERRIDE}/hair/chargenmorphcfg.xml"]
+    assert plan.merged == {} and plan.warnings == []

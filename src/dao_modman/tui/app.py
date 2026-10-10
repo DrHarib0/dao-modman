@@ -12,14 +12,20 @@ from textual.binding import Binding
 from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
 
 from ..core import archive as archives
-from ..core import deploy, pathops
+from ..core import deploy, laa, pathops
 from ..core.config import Config
 from ..core.install import install_from_nexus, link_to_nexus
 from ..core.library import Library, LibraryError
 from ..core.metadata import MetadataError
 from ..core.models import Mod, PathOp, ProfileEntry
 from ..core.nexus import NexusClient, NexusError, NxmLink, newest_file_id
-from .screens import ConfirmScreen, NexusAddScreen, PathOpsScreen, TextPromptScreen
+from .screens import (
+    ConfirmScreen,
+    NexusAddScreen,
+    PathOpsScreen,
+    TextPromptScreen,
+    ToolsScreen,
+)
 
 COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", "Ops", "Notes")
 
@@ -39,6 +45,7 @@ class ModManApp(App[None]):
         Binding("u", "update", "Update"),
         Binding("a", "apply", "Apply"),
         Binding("x", "unapply", "Unapply"),
+        Binding("t", "tools", "Tools"),
         Binding("delete", "remove", "Remove"),
         Binding("q", "quit", "Quit"),
     ]
@@ -309,10 +316,14 @@ class ModManApp(App[None]):
             self.error(exc)
             return
         lines = [f"Apply {len(plan.files)} file(s) to\n{user_dir} ?"]
+        lines += [f"\nwarning: {warning}" for warning in plan.warnings]
+        lines += [
+            f"\n{target}\n  merged from: {', '.join(mods)}" for target, mods in plan.merged.items()
+        ]
         if plan.addins:
             lines.append(f"\nAddIns: {', '.join(addin.name for addin in plan.addins)}")
         if plan.conflicts:
-            lines.append(f"\n{len(plan.conflicts)} conflicting path(s), last mod wins:")
+            lines.append(f"\n{len(plan.conflicts)} conflicting file(s), last mod wins:")
             lines += [
                 f"  {target}: {' < '.join(mods)}"
                 for target, mods in list(plan.conflicts.items())[:8]
@@ -366,3 +377,36 @@ class ModManApp(App[None]):
         if result.kept:
             message += f", kept {len(result.kept)} modified file(s)"
         self.notify(message)
+
+    # -- tools ------------------------------------------------------------
+
+    def action_tools(self) -> None:
+        install_dir = self.config.game_install_dir
+        try:
+            state = laa.status(install_dir) if install_dir else "game install dir not found"
+        except laa.LaaError as exc:
+            state = str(exc)
+        tools = [("laa_restore", "Restore the original game executable")]
+        if state != laa.PATCHED:
+            tools.insert(0, ("laa_patch", f"Apply the LAA (4 GB) patch - currently {state}"))
+
+        def done(tool: str | None) -> None:
+            if tool:
+                self.run_tool(tool)
+
+        self.push_screen(ToolsScreen(tools), done)
+
+    def run_tool(self, tool: str) -> None:
+        install_dir = self.config.game_install_dir
+        if not install_dir:
+            self.error("Game install dir not found: set game_install_dir in config.toml")
+            return
+        try:
+            if tool == "laa_patch":
+                backup = laa.patch(install_dir)
+                self.notify(f"LAA patch applied, original saved as {backup.name}", markup=False)
+            elif tool == "laa_restore":
+                laa.restore(install_dir)
+                self.notify("Original game executable restored")
+        except laa.LaaError as exc:
+            self.error(exc)
