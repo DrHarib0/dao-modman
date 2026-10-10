@@ -12,7 +12,12 @@ from dao_modman.core.library import Library
 from dao_modman.core.models import PathOp
 from dao_modman.core.paths import Dirs
 from dao_modman.tui.app import ModManApp
-from dao_modman.tui.screens import ConfirmScreen, NexusAddScreen, PathOpsScreen, TextPromptScreen
+from dao_modman.tui.screens import (
+    ConfirmScreen,
+    GroupScreen,
+    NexusAddScreen,
+    PathOpsScreen,
+)
 
 from .conftest import make_zip
 
@@ -54,7 +59,8 @@ async def test_toggle_move_and_group(tmp_path: Path, dirs: Dirs, user_dir: Path)
         assert [row[2] for row in rows(app)] == ["one", "two"]
 
         await pilot.press("g")
-        assert isinstance(app.screen, TextPromptScreen)
+        assert isinstance(app.screen, GroupScreen)
+        assert not app.screen.query_one(OptionList).display  # no groups exist yet
         await pilot.press(*"Hair", "enter")
         assert rows(app)[0][4] == "Hair"
 
@@ -569,3 +575,55 @@ def test_launch_command_and_app_id(tmp_path: Path, monkeypatch) -> None:
     assert paths.find_game_app_id([root]) is None
     (root / "steamapps/appmanifest_47810.acf").write_text('"AppState" {}')
     assert paths.find_game_app_id([root]) == "47810"
+
+
+async def test_group_can_be_picked_from_existing_ones(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    library = Library(dirs)
+    for name, group in (("one", "Textures"), ("two", "Bug fixes"), ("three", ""), ("four", "")):
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", {f"{name}.erf": name}))
+        library.profile.entry(name).group = group
+    library.save_profile()
+
+    def options(app: ModManApp) -> list[str]:
+        box = app.screen.query_one(OptionList)
+        return (
+            [box.get_option_at_index(i).id for i in range(box.option_count)] if box.display else []
+        )
+
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        # pick an existing group with the arrow keys
+        await pilot.press("down", "down", "g")
+        assert options(app) == ["Bug fixes", "Textures"]
+        await pilot.press("down", "down", "enter")
+        await pilot.pause()
+        assert rows(app)[2][4] == "Textures"
+
+        # typing narrows the list; enter in the box takes what was typed
+        await pilot.press("down", "g")
+        await pilot.press(*"bug")
+        assert options(app) == ["Bug fixes"]
+        await pilot.press("down", "enter")
+        await pilot.pause()
+        assert rows(app)[3][4] == "Bug fixes"
+
+        # the current group is prefilled and all groups are offered; a new name still works
+        await pilot.press("g")
+        assert app.screen.query_one(Input).value == "Bug fixes"
+        assert options(app) == ["Bug fixes", "Textures"]
+        app.screen.query_one(Input).value = "Gameplay"
+        await pilot.press("enter")
+        await pilot.pause()
+        assert rows(app)[3][4] == "Gameplay"
+
+        # clearing the box removes the group
+        await pilot.press("g")
+        app.screen.query_one(Input).value = ""
+        await pilot.press("enter")
+        await pilot.pause()
+        assert rows(app)[3][4] == ""
+
+    groups = {e.id: e.group for e in Library(dirs).profile.mods}
+    assert groups == {"one": "Textures", "two": "Bug fixes", "three": "Textures", "four": ""}

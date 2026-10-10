@@ -25,6 +25,7 @@ from ..core.models import Mod, PathOp, ProfileEntry
 from ..core.nexus import GAME, NexusClient, NexusError, NxmLink, newest_file_id, parse_nxm
 from .screens import (
     ConfirmScreen,
+    GroupScreen,
     NexusAddScreen,
     PathOpsScreen,
     TextPromptScreen,
@@ -290,7 +291,8 @@ class ModManApp(App[None]):
                 self.library.save_profile()
                 self.refresh_table()
 
-        self.push_screen(TextPromptScreen("Group (empty for none)", entry.group), done)
+        groups = sorted({e.group for e in self.library.profile.mods if e.group}, key=str.casefold)
+        self.push_screen(GroupScreen(entry.group, groups), done)
 
     def action_edit_paths(self) -> None:
         mod = self.current_mod()

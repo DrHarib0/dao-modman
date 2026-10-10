@@ -60,6 +60,64 @@ class TextPromptScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class GroupScreen(ModalScreen[str | None]):
+    """Pick one of the existing groups or type a new one. Result: the group name."""
+
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("down", "to_list", "Existing groups", show=False),
+    ]
+
+    def __init__(self, current: str, groups: list[str]) -> None:
+        super().__init__()
+        self.current = current
+        self.groups = groups
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label("Group (empty for none)", classes="title")
+            yield Input(value=self.current, placeholder="type a new group or pick one below")
+            yield OptionList(id="groups")
+            yield Label(
+                "[b]enter[/] ok   [b]\u2193[/] existing groups   [b]esc[/] cancel", classes="hint"
+            )
+
+    def on_mount(self) -> None:
+        self._show(self.groups)
+
+    def _show(self, groups: list[str]) -> None:
+        options = self.query_one("#groups", OptionList)
+        options.clear_options()
+        options.add_options([Option(escape(group), id=group) for group in groups])
+        options.display = bool(groups)
+
+    @on(Input.Changed)
+    def narrow(self, event: Input.Changed) -> None:
+        """Typing narrows the list down; the unchanged current group shows all of them."""
+        text = event.value.strip().casefold()
+        if text == self.current.casefold():
+            self._show(self.groups)
+        else:
+            self._show([group for group in self.groups if text in group.casefold()])
+
+    def action_to_list(self) -> None:
+        options = self.query_one("#groups", OptionList)
+        if options.display and not options.has_focus:
+            options.highlighted = 0
+            options.focus()
+
+    @on(Input.Submitted)
+    def submit(self, event: Input.Submitted) -> None:
+        self.dismiss(event.value.strip())
+
+    @on(OptionList.OptionSelected)
+    def select(self, event: OptionList.OptionSelected) -> None:
+        self.dismiss(event.option.id)
+
+    def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
 class ToolsScreen(ModalScreen[str | None]):
     """A menu of one-off tools. Result: the id of the chosen tool."""
 

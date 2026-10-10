@@ -72,6 +72,12 @@ ModalScreen {
     height: 1fr;
 }
 
+#groups {
+    height: auto;
+    max-height: 10;
+    margin-top: 1;
+}
+
 #filter {
     margin-top: 1;
 }
