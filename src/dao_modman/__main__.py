@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .core import laa, nexus
+from .core import console, laa, nexus
 from .core.config import Config, load_config
 from .core.install import install_from_nexus
 from .core.library import Library, LibraryError
@@ -96,6 +96,33 @@ def cmd_laa(action: str, exe: Path | None) -> int:
     return 0
 
 
+def cmd_console(action: str) -> int:
+    config = load_config()
+    if not config.game_install_dir:
+        print(
+            "error: game install dir not found: set game_install_dir in config.toml",
+            file=sys.stderr,
+        )
+        return 1
+    try:
+        if action == "enable":
+            console.enable(config.game_install_dir)
+            key = console.ensure_key(config.game_user_dir) if config.game_user_dir else None
+            print(f"console enabled, open it with: {console.key_label(key)}")
+            if not console.fonts_installed(config.game_user_dir, Library(config.dirs)):
+                print(f"console text is invisible without fonts.erf: {console.FONTS_MOD_URL}")
+        elif action == "disable":
+            console.disable(config.game_install_dir)
+            print("console disabled")
+        else:
+            state = "enabled" if console.is_enabled(config.game_install_dir) else "disabled"
+            print(f"console: {state}")
+    except console.ConsoleError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dao-modman", description=__doc__)
     commands = parser.add_subparsers(dest="command")
@@ -108,10 +135,14 @@ def main(argv: list[str] | None = None) -> int:
     laa_cmd.add_argument(
         "--exe", type=Path, help="patched executable to use instead of the bundled"
     )
+    console_cmd = commands.add_parser("console", help="enable the game's developer console")
+    console_cmd.add_argument("action", choices=["status", "enable", "disable"])
     args = parser.parse_args(argv)
 
     if args.command == "nxm":
         return cmd_nxm(args.url, args.wait)
+    if args.command == "console":
+        return cmd_console(args.action)
     if args.command == "laa":
         return cmd_laa(args.action, args.exe)
     if args.command == "install-nxm-handler":

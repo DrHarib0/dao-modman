@@ -207,13 +207,13 @@ async def test_tools_menu_laa_patch_and_restore(
     app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 2
+        assert app.screen.query_one(OptionList).option_count == 3
         await pilot.press("enter")  # first entry: apply the patch
         await pilot.pause()
         assert laa.is_laa(exe)
 
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 1  # only restore is left
+        assert app.screen.query_one(OptionList).option_count == 2  # the patch entry is gone
         await pilot.press("enter")
         await pilot.pause()
         assert not laa.is_laa(exe)
@@ -278,3 +278,40 @@ async def test_official_addins_are_listed_and_can_be_hidden(
         assert len(rows(app)) == 3  # still hidden after a restart
         await pilot.press("h")
         assert len(rows(app)) == 5
+
+
+async def test_tools_menu_enable_console(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    from dao_modman.core import console
+
+    from .test_console import make_game
+
+    install_dir = make_game(tmp_path, user_dir)
+    opened: list[str] = []
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
+    app.open_url = lambda url, **_: opened.append(url)
+
+    async def run_last_tool(pilot) -> None:
+        await pilot.press("t", "end", "enter")  # the console entry is the last one
+        await pilot.pause()
+
+    async with app.run_test(size=(140, 40)) as pilot:
+        await run_last_tool(pilot)
+        assert console.is_enabled(install_dir)
+        assert isinstance(app.screen, ConfirmScreen)  # fonts.erf is missing: offer the mod
+        await pilot.press("n")
+        assert opened == []
+
+        await run_last_tool(pilot)  # now "disable"
+        assert not console.is_enabled(install_dir)
+
+        await run_last_tool(pilot)
+        await pilot.press("y")
+        assert opened == [console.FONTS_MOD_URL]
+
+        # with fonts.erf in place there is nothing to ask
+        await run_last_tool(pilot)
+        (user_dir / "packages/core/data").mkdir(parents=True)
+        (user_dir / "packages/core/data/Fonts.erf").write_bytes(b"erf")
+        await run_last_tool(pilot)
+        assert console.is_enabled(install_dir)
+        assert not isinstance(app.screen, ConfirmScreen)

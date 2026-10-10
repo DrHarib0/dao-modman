@@ -13,7 +13,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
 
-from ..core import addins, deploy, laa, pathops
+from ..core import addins, console, deploy, laa, pathops
 from ..core import archive as archives
 from ..core.config import Config
 from ..core.dazip import AddIn
@@ -442,6 +442,14 @@ class ModManApp(App[None]):
         tools = [("laa_restore", "Restore the original game executable")]
         if state != laa.PATCHED:
             tools.insert(0, ("laa_patch", f"Apply the LAA (4 GB) patch - currently {state}"))
+        try:
+            console_on = bool(install_dir) and console.is_enabled(install_dir)
+        except console.ConsoleError:
+            console_on = False
+        if console_on:
+            tools.append(("console_disable", "Disable the developer console"))
+        else:
+            tools.append(("console_enable", "Enable the developer console"))
 
         def done(tool: str | None) -> None:
             if tool:
@@ -461,5 +469,33 @@ class ModManApp(App[None]):
             elif tool == "laa_restore":
                 laa.restore(install_dir)
                 self.notify("Original game executable restored")
-        except laa.LaaError as exc:
+            elif tool == "console_enable":
+                self.enable_console(install_dir)
+            elif tool == "console_disable":
+                console.disable(install_dir)
+                self.notify("Developer console disabled")
+        except (laa.LaaError, console.ConsoleError) as exc:
             self.error(exc)
+
+    def enable_console(self, install_dir: Path) -> None:
+        console.enable(install_dir)
+        user_dir = self.config.game_user_dir
+        key = console.ensure_key(user_dir) if user_dir else None
+        self.notify(
+            f"Developer console enabled, open it with: {console.key_label(key)}", markup=False
+        )
+        if console.fonts_installed(user_dir, self.library):
+            return
+
+        def done(confirmed: bool | None) -> None:
+            if confirmed:
+                self.open_url(console.FONTS_MOD_URL)
+
+        self.push_screen(
+            ConfirmScreen(
+                "Without fonts.erf, what you type in the console stays invisible.\n\n"
+                'Open the Nexus page of "Make CONSOLE commands visible" to install it?\n'
+                'Use "Mod Manager Download" there and add the link with n.'
+            ),
+            done,
+        )

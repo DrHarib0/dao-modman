@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 
+from . import console
 from .library import Library
 from .models import Mod
 from .nexus import (
@@ -72,6 +73,7 @@ async def install_from_nexus(
         version=version,
         nexus=info,
     )
+    console.place_fonts(library, mod)
     return mod, False
 
 

@@ -21,6 +21,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
     uv run dao-modman nxm 'nxm://...'      # handle a "Mod Manager Download" link
     uv run dao-modman install-nxm-handler  # register as nxm:// handler
     uv run dao-modman laa status|patch|restore   # Large Address Aware patch, see below
+    uv run dao-modman console status|enable|disable   # developer console, see below
 
     uv run pytest
     uv run ruff check . && uv run ruff format .
@@ -41,7 +42,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 | `u`              | update the selected mod in place         |
 | `a` / `x`        | apply / unapply                          |
 | `h`              | hide / show the game's official DLC      |
-| `t`              | tools (LAA patch)                        |
+| `t`              | tools (LAA patch, developer console)     |
 | `delete`         | remove mod from the library              |
 
 ## Data
@@ -125,6 +126,24 @@ Steam executable cannot simply be flagged in place, so a patched `DAOrigins.exe`
 `DAOrigins.exe.pre-laa`; `laa restore` puts it back. Steam's "verify integrity of game files"
 also restores the original, after which the patch has to be applied again.
 
+## Developer console
+
+`dao-modman console enable` (or Tools in the TUI) switches the game's developer console on,
+the way the [Dragon Age wiki](https://dragonage.fandom.com/wiki/Console_(Origins)#Steam)
+describes for the Steam release:
+
+- `-enabledeveloperconsole` is added to the entry that launches `DAOrigins.exe` in
+  `data/DAOriginsLauncher.xml` of the install dir. The original is kept as
+  `DAOriginsLauncher.xml.pre-console`; `console disable` removes the switch again.
+- The console opens with the key bound to `OpenConsole_0` in `Settings/KeyBindings.ini`
+  (grave by default). If no key is assigned there, grave is bound.
+
+What you type is invisible unless the game has a `packages/core/data/fonts.erf`. If it is
+missing, the tool offers to open the Nexus page of
+[Make CONSOLE commands visible](https://www.nexusmods.com/dragonage/mods/1110). When that mod
+is installed through dao-modman, its `fonts.erf` is routed to `packages/core/data/`
+automatically (a rename operation in its `mod.toml`).
+
 ## Layout
 
     src/dao_modman/
@@ -143,6 +162,7 @@ also restores the original, after which the patch has to be applied again.
         chargen.py     # chargenmorphcfg.xml merging
         deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply
         laa.py         # LAA patch for the game executable
+        console.py     # developer console switch, key binding, fonts.erf
       assets/laa/      # LAA-patched DAOrigins.exe
       tui/
         app.py, app.tcss
