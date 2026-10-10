@@ -210,3 +210,62 @@ async def test_tools_menu_laa_patch_and_restore(
         await pilot.press("enter")
         await pilot.pause()
         assert not laa.is_laa(exe)
+
+
+async def test_official_addins_are_listed_and_can_be_hidden(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    from .conftest import make_dazip
+    from .test_addins import ADDINS_XML
+
+    install_dir = tmp_path / "game"
+    for uid in ("dao_prc_ep_1", "dao_prc_cp_2"):
+        (install_dir / "Addins" / uid).mkdir(parents=True)
+    (user_dir / "Settings").mkdir()
+    (user_dir / "Settings/addins.xml").write_text(ADDINS_XML, encoding="utf-8")
+    library = Library(dirs)
+    library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1"}))
+    # ours: registered under the same UID as the "pretender" entry, so it gets no extra row
+    library.import_archive(make_dazip(tmp_path / "p.dazip", uid="pretender", title="Pretender"))
+
+    def names(app: ModManApp) -> list[tuple[str, str]]:
+        return [(row[2], row[5]) for row in rows(app)]
+
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
+    async with app.run_test(size=(140, 40)) as pilot:
+        assert names(app) == [
+            ("Dragon Age: Awakening", "official"),
+            ("The Stone Prisoner", "official"),
+            ("Lock Bash", "external"),
+            ("one", "override"),
+            ("Pretender", "dazip"),
+        ]
+        assert rows(app)[0][6] == "game" and rows(app)[2][6] == "user dir"
+        assert rows(app)[1][1] == ""  # disabled in the game
+        assert app.current_entry().id == "one"  # the cursor starts on the first mod
+
+        # AddIn rows are read-only
+        await pilot.press("up", "space", "J", "delete")
+        assert app.current_entry() is None
+        assert not isinstance(app.screen, ConfirmScreen)
+        assert [e.enabled for e in app.library.profile.mods] == [True, True]
+
+        # mod actions still hit the right mod below the AddIn rows
+        await pilot.press("down", "J")
+        assert names(app)[3:] == [("Pretender", "dazip"), ("one", "override")]
+        assert app.current_entry().id == "one"
+
+        await pilot.press("h")
+        assert names(app) == [
+            ("Lock Bash", "external"),
+            ("Pretender", "dazip"),
+            ("one", "override"),
+        ]
+        assert app.current_entry().id == "one"
+
+    assert Library(dirs).profile.hide_official
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
+    async with app.run_test(size=(140, 40)) as pilot:
+        assert len(rows(app)) == 3  # still hidden after a restart
+        await pilot.press("h")
+        assert len(rows(app)) == 5

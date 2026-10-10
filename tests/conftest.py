@@ -11,9 +11,10 @@ from dao_modman.core.paths import Dirs
 MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
 <Manifest Type="AddIn">
   <AddInsList>
-    <AddInItem UID="{uid}" Name="{uid}" ExtendedModuleUID="Single Player" Version="1.2"
-               Enabled="1" State="2" Format="1">
+    <AddInItem UID="{uid}" Name="{uid}" ExtendedModuleUID="Single Player" Priority="50"
+               Enabled="1" State="2" Format="1" BioWare="0">
       <Title DefaultText="{title}" />
+      <Version>1.2</Version>
     </AddInItem>
   </AddInsList>
 </Manifest>

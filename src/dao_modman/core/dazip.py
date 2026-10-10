@@ -20,6 +20,27 @@ class AddIn:
     name: str
     version: str
     element: ET.Element
+    enabled: bool = True
+    bioware: bool = False
+    extends: str = ""  # ExtendedModuleUID: "Single Player", another AddIn's UID or empty
+
+
+def addin_from_element(item: ET.Element) -> AddIn | None:
+    """Describe an `<AddInItem>` as found in a dazip manifest or the game's addins.xml."""
+    uid = item.get("UID")
+    if not uid:
+        return None
+    title = item.find("Title")
+    name = (title.get("DefaultText") if title is not None else None) or item.get("Name") or uid
+    return AddIn(
+        uid=uid,
+        name=name.strip(),
+        version=(item.findtext("Version") or item.get("Version") or "").strip(),
+        element=item,
+        enabled=item.get("Enabled", "1") != "0",
+        bioware=item.get("BioWare") == "1",
+        extends=item.get("ExtendedModuleUID") or "",
+    )
 
 
 def find_manifest(files_dir: Path) -> Path | None:
@@ -44,12 +65,4 @@ def parse_manifest(manifest: Path) -> list[AddIn]:
         root = ET.parse(manifest).getroot()
     except (ET.ParseError, OSError) as exc:
         raise DazipError(f"cannot read {manifest}: {exc}") from exc
-    addins = []
-    for item in root.iter("AddInItem"):
-        uid = item.get("UID")
-        if not uid:
-            continue
-        title = item.find("Title")
-        name = (title.get("DefaultText") if title is not None else None) or item.get("Name") or uid
-        addins.append(AddIn(uid=uid, name=name, version=item.get("Version", ""), element=item))
-    return addins
+    return [addin for item in root.iter("AddInItem") if (addin := addin_from_element(item))]

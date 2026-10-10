@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 from pathlib import Path
 
 import httpx
+from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.widgets import DataTable, Footer, Header, ProgressBar, Static
 
+from ..core import addins, deploy, laa, pathops
 from ..core import archive as archives
-from ..core import deploy, laa, pathops
 from ..core.config import Config
+from ..core.dazip import AddIn
 from ..core.install import install_from_nexus, link_to_nexus
 from ..core.library import Library, LibraryError
 from ..core.metadata import MetadataError
@@ -45,6 +48,7 @@ class ModManApp(App[None]):
         Binding("u", "update", "Update"),
         Binding("a", "apply", "Apply"),
         Binding("x", "unapply", "Unapply"),
+        Binding("h", "toggle_official", "DLC"),
         Binding("t", "tools", "Tools"),
         Binding("delete", "remove", "Remove"),
         Binding("q", "quit", "Quit"),
@@ -59,6 +63,8 @@ class ModManApp(App[None]):
         )
         self.account: dict | None = None
         self.updates: set[str] = set()
+        self._addin_row_count = 0
+        self._addins_error_shown = False
 
     # -- layout -----------------------------------------------------------
 
@@ -81,6 +87,30 @@ class ModManApp(App[None]):
         if self.nexus:
             await self.nexus.aclose()
 
+    def addin_rows(self) -> list[tuple[AddIn, str]]:
+        """AddIns registered with the game that are not ours: official DLC and foreign ones."""
+        if not self.config.game_user_dir:
+            return []
+        try:
+            registered = addins.list_registered(self.config.game_user_dir)
+        except addins.AddInsError as exc:
+            if not self._addins_error_shown:
+                self._addins_error_shown = True
+                self.error(exc)
+            return []
+        managed = {uid for mod in self.library.mods.values() for uid in mod.addin_uids}
+        with contextlib.suppress(deploy.DeployError):
+            record = deploy.load_record(self.config.dirs.deployed_file) or {}
+            managed |= set(record.get("addins", []))
+        shipped = addins.shipped_uids(self.config.game_install_dir)
+        rows = []
+        for addin in registered:
+            kind = addins.classify(addin, managed, shipped)
+            hidden = kind == addins.OFFICIAL and self.library.profile.hide_official
+            if kind != addins.MANAGED and not hidden:
+                rows.append((addin, kind))
+        return rows
+
     def refresh_table(self, select: str | None = None) -> None:
         table = self.query_one("#mods", DataTable)
         selected = select or (entry.id if (entry := self.current_entry()) else None)
@@ -90,6 +120,22 @@ class ModManApp(App[None]):
             conflicting = set()
             self.notify(str(exc), severity="error", markup=False)
         table.clear()
+        shipped = addins.shipped_uids(self.config.game_install_dir)
+        addin_rows = self.addin_rows()
+        self._addin_row_count = len(addin_rows)
+        for addin, kind in addin_rows:
+            cells = (
+                "",
+                "x" if addin.enabled else "",
+                addin.name,
+                addin.version,
+                "",
+                kind,
+                "game" if addin.uid.casefold() in shipped else "user dir",
+                "",
+                "",
+            )
+            table.add_row(*(Text(cell, style="dim") for cell in cells), key=f"addin:{addin.uid}")
         for index, (entry, mod) in enumerate(self.library.ordered(), 1):
             notes = [
                 note
@@ -113,7 +159,9 @@ class ModManApp(App[None]):
             )
         ids = [entry.id for entry in self.library.profile.mods]
         if selected in ids:
-            table.move_cursor(row=ids.index(selected))
+            table.move_cursor(row=self._addin_row_count + ids.index(selected))
+        elif ids:
+            table.move_cursor(row=self._addin_row_count)  # start on the first mod
         self.refresh_status()
 
     def refresh_status(self) -> None:
@@ -133,8 +181,9 @@ class ModManApp(App[None]):
     def current_entry(self) -> ProfileEntry | None:
         table = self.query_one("#mods", DataTable)
         entries = self.library.profile.mods
-        if table.row_count and 0 <= table.cursor_row < len(entries):
-            return entries[table.cursor_row]
+        index = table.cursor_row - self._addin_row_count  # AddIn rows come first
+        if table.row_count and 0 <= index < len(entries):
+            return entries[index]
         return None
 
     def current_mod(self) -> Mod | None:
@@ -151,6 +200,12 @@ class ModManApp(App[None]):
             entry.enabled = not entry.enabled
             self.library.save_profile()
             self.refresh_table()
+
+    def action_toggle_official(self) -> None:
+        profile = self.library.profile
+        profile.hide_official = not profile.hide_official
+        self.library.save_profile()
+        self.refresh_table()
 
     def action_move(self, delta: int) -> None:
         entry = self.current_entry()

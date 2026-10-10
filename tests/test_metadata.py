@@ -56,7 +56,9 @@ def test_hand_edited_bad_ops_are_rejected(tmp_path: Path, ops: str) -> None:
 def test_profile_round_trip(tmp_path: Path) -> None:
     path = tmp_path / "profile.toml"
     assert metadata.load_profile(path) == Profile()
-    profile = Profile([ProfileEntry("a"), ProfileEntry("b", enabled=False, group="Textures")])
+    profile = Profile(
+        [ProfileEntry("a"), ProfileEntry("b", enabled=False, group="Textures")], hide_official=True
+    )
     metadata.save_profile(path, profile)
     assert metadata.load_profile(path) == profile
 

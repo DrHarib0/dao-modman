@@ -67,6 +67,7 @@ class Profile:
     """Load order: later entries have higher priority."""
 
     mods: list[ProfileEntry] = field(default_factory=list)
+    hide_official: bool = False  # hide the game's own DLC in the mod list
 
     def entry(self, mod_id: str) -> ProfileEntry | None:
         return next((entry for entry in self.mods if entry.id == mod_id), None)

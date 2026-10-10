@@ -145,7 +145,8 @@ def load_profile(path: Path) -> Profile:
                     group=str(entry.get("group", "")),
                 )
                 for entry in raw.get("mods", [])
-            ]
+            ],
+            hide_official=bool(raw.get("hide_official", False)),
         )
     except (OSError, tomllib.TOMLDecodeError, KeyError, TypeError) as exc:
         raise MetadataError(f"{path}: {exc}") from exc
@@ -153,9 +154,10 @@ def load_profile(path: Path) -> Profile:
 
 def save_profile(path: Path, profile: Profile) -> None:
     data = {
+        "hide_official": profile.hide_official,
         "mods": [
             {"id": entry.id, "enabled": entry.enabled, "group": entry.group}
             for entry in profile.mods
-        ]
+        ],
     }
     write_atomic(path, tomli_w.dumps(data).encode())

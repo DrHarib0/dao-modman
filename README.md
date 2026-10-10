@@ -40,6 +40,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 | `c`              | check Nexus for updates                  |
 | `u`              | update the selected mod in place         |
 | `a` / `x`        | apply / unapply                          |
+| `h`              | hide / show the game's official DLC      |
 | `t`              | tools (LAA patch)                        |
 | `delete`         | remove mod from the library              |
 
@@ -99,6 +100,20 @@ Paths are relative to the game user dir and matched case-insensitively.
 - Every deployed file is recorded with its SHA-256. Unapply deletes only files that are still
   unchanged; files that existed before or were edited are left alone.
 - dazip AddIns are added to / removed from `Settings/AddIns.xml`.
+
+## Official DLC and other AddIns
+
+The game's `Settings/addins.xml` already lists its own DLC, and dazip mods are registered in
+the same file. Entries that do not belong to a mod in the library are shown read-only above
+the mods (`On` reflects whether the game has them enabled); `h` hides the official ones.
+
+- **official**: the AddIn ships in the game's install dir (`Addins/<uid>/`), or carries
+  `BioWare="1"`. The install dir is the reliable sign; the attribute is self-declared and only
+  needed for DLC that was downloaded into the user dir.
+- **external**: anything else, i.e. installed by hand or by another mod manager.
+
+An AddIn registered by one of the library's mods is never counted as official, whatever its
+manifest claims.
 
 ## Large Address Aware (LAA) patch
 
