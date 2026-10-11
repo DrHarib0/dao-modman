@@ -11,7 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-import httpx
+import httpx2
 
 from .models import NexusInfo
 
@@ -99,9 +99,9 @@ def nexus_info(mod_id: int, file: dict) -> NexusInfo:
 
 
 class NexusClient:
-    def __init__(self, token: str, *, transport: httpx.AsyncBaseTransport | None = None) -> None:
+    def __init__(self, token: str, *, transport: httpx2.AsyncBaseTransport | None = None) -> None:
         user_agent = f"{APP_NAME}/{APP_VERSION}"
-        self._api = httpx.AsyncClient(
+        self._api = httpx2.AsyncClient(
             base_url=API_BASE,
             transport=transport,
             timeout=30,
@@ -113,9 +113,9 @@ class NexusClient:
             },
         )
         # Downloads come from CDN hosts, which must never see the API key.
-        self._cdn = httpx.AsyncClient(
+        self._cdn = httpx2.AsyncClient(
             transport=transport,
-            timeout=httpx.Timeout(30, read=120),
+            timeout=httpx2.Timeout(30, read=120),
             follow_redirects=True,
             headers={"User-Agent": user_agent},
         )
@@ -127,7 +127,7 @@ class NexusClient:
     async def _get(self, path: str, **params: str) -> dict | list:
         try:
             response = await self._api.get(path, params=params or None)
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             raise NexusError(f"Nexus request failed: {exc.__class__.__name__}") from exc
         if response.status_code == 429:
             daily = response.headers.get("x-rl-daily-remaining", "?")
@@ -216,7 +216,7 @@ class NexusClient:
             if expected_md5 and md5.hexdigest() != expected_md5.lower():
                 raise NexusError(f"checksum mismatch for {safe_name}")
             os.replace(part, dest)
-        except httpx.HTTPError as exc:
+        except httpx2.HTTPError as exc:
             raise NexusError(f"download failed: {exc.__class__.__name__}") from exc
         finally:
             part.unlink(missing_ok=True)

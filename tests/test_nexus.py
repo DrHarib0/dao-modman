@@ -3,7 +3,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 
 from dao_modman.core import nexus
@@ -18,30 +18,30 @@ FILE = {
 }
 
 
-def make_client(premium: bool = True, seen: list[httpx.Request] | None = None) -> NexusClient:
-    def handler(request: httpx.Request) -> httpx.Response:
+def make_client(premium: bool = True, seen: list[httpx2.Request] | None = None) -> NexusClient:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if seen is not None:
             seen.append(request)
         path = request.url.path
         if request.url.host == "cdn.example":
-            return httpx.Response(200, content=PAYLOAD)
+            return httpx2.Response(200, content=PAYLOAD)
         if request.headers.get("apikey") != "secret":
-            return httpx.Response(401, json={"message": "bad key"})
+            return httpx2.Response(401, json={"message": "bad key"})
         if path == "/v1/users/validate.json":
-            return httpx.Response(200, json={"name": "seb", "is_premium": premium})
+            return httpx2.Response(200, json={"name": "seb", "is_premium": premium})
         if path == "/v1/games/dragonage/mods/7.json":
-            return httpx.Response(200, json={"mod_id": 7, "name": "My Mod", "version": "1.0"})
+            return httpx2.Response(200, json={"mod_id": 7, "name": "My Mod", "version": "1.0"})
         if path == "/v1/games/dragonage/mods/7/files.json":
-            return httpx.Response(200, json={"files": [FILE], "file_updates": []})
+            return httpx2.Response(200, json={"files": [FILE], "file_updates": []})
         if path == "/v1/games/dragonage/mods/7/files/22/download_link.json":
             if not premium and request.url.params.get("key") != "k":
-                return httpx.Response(403, json={"message": "premium only"})
-            return httpx.Response(200, json=[{"URI": "https://cdn.example/f.zip?token=t"}])
+                return httpx2.Response(403, json={"message": "premium only"})
+            return httpx2.Response(200, json=[{"URI": "https://cdn.example/f.zip?token=t"}])
         if path == "/v1/games/dragonage/mods/8.json":
-            return httpx.Response(429, headers={"x-rl-daily-remaining": "0"})
-        return httpx.Response(404, json={"message": "not found"})
+            return httpx2.Response(429, headers={"x-rl-daily-remaining": "0"})
+        return httpx2.Response(404, json={"message": "not found"})
 
-    return NexusClient("secret", transport=httpx.MockTransport(handler))
+    return NexusClient("secret", transport=httpx2.MockTransport(handler))
 
 
 def test_parse_nxm() -> None:
@@ -106,7 +106,7 @@ async def test_errors() -> None:
 
 
 async def test_download_premium(tmp_path: Path) -> None:
-    seen: list[httpx.Request] = []
+    seen: list[httpx2.Request] = []
     client = make_client(seen=seen)
     progress: list[tuple[int, int | None]] = []
     path = await nexus.fetch_archive(
@@ -169,18 +169,18 @@ async def test_install_from_nexus_and_update_in_place(tmp_path: Path) -> None:
         "file_updates": [{"old_file_id": 1, "new_file_id": 2}],
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
         if request.url.host == "cdn.example":
-            return httpx.Response(200, content=payloads[path])
+            return httpx2.Response(200, content=payloads[path])
         if path.endswith("/mods/7.json"):
-            return httpx.Response(200, json={"mod_id": 7, "name": "My Mod", "version": "9"})
+            return httpx2.Response(200, json={"mod_id": 7, "name": "My Mod", "version": "9"})
         if path.endswith("/files.json"):
-            return httpx.Response(200, json=listing)
+            return httpx2.Response(200, json=listing)
         file_id = path.split("/")[-2]
-        return httpx.Response(200, json=[{"URI": f"https://cdn.example/v{file_id}.zip"}])
+        return httpx2.Response(200, json=[{"URI": f"https://cdn.example/v{file_id}.zip"}])
 
-    client = NexusClient("secret", transport=httpx.MockTransport(handler))
+    client = NexusClient("secret", transport=httpx2.MockTransport(handler))
     library = Library(Dirs(tmp_path / "data", tmp_path / "data/downloads"))
 
     mod, updated = await install_from_nexus(client, library, 7, 1)
@@ -209,11 +209,11 @@ async def test_link_to_nexus_by_md5(tmp_path: Path) -> None:
     from dao_modman.core.library import Library
     from dao_modman.core.paths import Dirs
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         if request.url.path.endswith(f"/md5_search/{known.archive.md5}.json"):
             match = {"mod": {"mod_id": 7}, "file_details": {"file_id": 22, "version": "3"}}
-            return httpx.Response(200, json=[match])
-        return httpx.Response(404, json={"message": "not found"})
+            return httpx2.Response(200, json=[match])
+        return httpx2.Response(404, json={"message": "not found"})
 
     library = Library(Dirs(tmp_path / "data", tmp_path / "data/downloads"))
     for name in ("known", "unknown"):
@@ -221,7 +221,7 @@ async def test_link_to_nexus_by_md5(tmp_path: Path) -> None:
             zf.writestr("a.erf", name)
     known = library.import_archive(tmp_path / "known.zip")
     unknown = library.import_archive(tmp_path / "unknown.zip")
-    client = NexusClient("secret", transport=httpx.MockTransport(handler))
+    client = NexusClient("secret", transport=httpx2.MockTransport(handler))
 
     assert await link_to_nexus(client, library, known)
     assert not await link_to_nexus(client, library, unknown)

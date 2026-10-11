@@ -3,7 +3,7 @@ from __future__ import annotations
 import zipfile
 from pathlib import Path
 
-import httpx
+import httpx2
 import pytest
 from textual.widgets import DataTable, Input, OptionList, Static, Tree
 
@@ -157,23 +157,23 @@ async def test_add_from_nexus(tmp_path: Path, dirs: Dirs, user_dir: Path) -> Non
         "file_updates": [],
     }
 
-    def handler(request: httpx.Request) -> httpx.Response:
+    def handler(request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
         if request.url.host == "cdn.example":
-            return httpx.Response(200, content=payload_path.read_bytes())
+            return httpx2.Response(200, content=payload_path.read_bytes())
         if path.endswith("/users/validate.json"):
-            return httpx.Response(200, json={"name": "seb", "is_premium": True})
+            return httpx2.Response(200, json={"name": "seb", "is_premium": True})
         if path.endswith("/mods/7.json"):
-            return httpx.Response(200, json={"mod_id": 7, "name": "My Mod"})
+            return httpx2.Response(200, json={"mod_id": 7, "name": "My Mod"})
         if path.endswith("/mods/7/files.json"):
-            return httpx.Response(200, json=listing)
+            return httpx2.Response(200, json=listing)
         if path.endswith("/files/22/download_link.json"):
-            return httpx.Response(200, json=[{"URI": "https://cdn.example/x.zip"}])
-        return httpx.Response(404, json={"message": "nope"})
+            return httpx2.Response(200, json=[{"URI": "https://cdn.example/x.zip"}])
+        return httpx2.Response(404, json={"message": "nope"})
 
     app = ModManApp(
         Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret"),
-        transport=httpx.MockTransport(handler),
+        transport=httpx2.MockTransport(handler),
     )
     async with app.run_test(size=(140, 40)) as pilot:
         await app.workers.wait_for_complete()
@@ -339,26 +339,26 @@ async def test_link_from_the_handler_downloads_in_the_running_app(
         {"file_id": 23, "file_name": "two.zip", "name": "Two", "category_name": "OPTIONAL"},
     ]
 
-    async def handler(request: httpx.Request) -> httpx.Response:
+    async def handler(request: httpx2.Request) -> httpx2.Response:
         path = request.url.path
         if request.url.host == "cdn.example":
             await release.wait()  # keep the downloads running until the test has looked
-            return httpx.Response(200, content=payload)
+            return httpx2.Response(200, content=payload)
         if path.endswith("/users/validate.json"):
-            return httpx.Response(200, json={"name": "seb", "is_premium": False})
+            return httpx2.Response(200, json={"name": "seb", "is_premium": False})
         if path.endswith("/mods/7.json"):
-            return httpx.Response(200, json={"mod_id": 7, "name": "My Mod"})
+            return httpx2.Response(200, json={"mod_id": 7, "name": "My Mod"})
         if path.endswith("/mods/7/files.json"):
-            return httpx.Response(200, json={"files": files, "file_updates": []})
+            return httpx2.Response(200, json={"files": files, "file_updates": []})
         if path.endswith("/download_link.json") and request.url.params.get("key") == "k":
             file_id = path.split("/")[-2]
-            return httpx.Response(200, json=[{"URI": f"https://cdn.example/{file_id}.zip"}])
-        return httpx.Response(403, json={"message": "nope"})
+            return httpx2.Response(200, json=[{"URI": f"https://cdn.example/{file_id}.zip"}])
+        return httpx2.Response(403, json={"message": "nope"})
 
     runtime = tmp_path / "run"
     runtime.mkdir()
     config = Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret", runtime_dir=runtime)
-    app = ModManApp(config, transport=httpx.MockTransport(handler))
+    app = ModManApp(config, transport=httpx2.MockTransport(handler))
 
     def link(file_id: int) -> str:
         return f"nxm://dragonage/mods/7/files/{file_id}?key=k&expires=99"

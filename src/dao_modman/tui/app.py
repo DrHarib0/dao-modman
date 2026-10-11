@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 from pathlib import Path
 
-import httpx
+import httpx2
 from rich.text import Text
 from textual import work
 from textual.app import App, ComposeResult
@@ -85,7 +85,7 @@ class ModManApp(App[None]):
         self,
         config: Config,
         *,
-        transport: httpx.AsyncBaseTransport | None = None,
+        transport: httpx2.AsyncBaseTransport | None = None,
         links: list[str] | None = None,
     ) -> None:
         super().__init__()
