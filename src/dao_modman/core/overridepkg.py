@@ -155,35 +155,38 @@ def apply_options(
     For every key the chosen variant is deployed at the original file's path, and no variant
     is deployed under its own name. `root` is the package's folder inside the mod's files,
     `folder` the target folder of its OverrideConfig.xml. Returns `(mapping, warnings)`.
+
+    Everything is looked up in the mapping as it came in: packages reuse one variant file
+    for several options, so resolving one option must not take a file away from the next.
     """
-    result = dict(mapping)
-    warnings: list[str] = []
     prefix = f"{root}/" if root else ""
+    by_name: dict[str, list[str]] = {}  # file name -> targets of the package's files
+    for target, source in sorted(mapping.items()):
+        if source.startswith(prefix):
+            by_name.setdefault(source.rpartition("/")[2].casefold(), []).append(target)
 
-    def in_package(name: str) -> list[str]:
-        """Targets of the package's files with this name."""
-        wanted = name.casefold()
-        return sorted(
-            target
-            for target, source in result.items()
-            if source.startswith(prefix) and source.rpartition("/")[2].casefold() == wanted
-        )
-
+    variants = {value.file.casefold() for key in keys for value in key.values}
+    result = {
+        target: source
+        for target, source in mapping.items()
+        if not (source.startswith(prefix) and source.rpartition("/")[2].casefold() in variants)
+    }
+    warnings: list[str] = []
     for key in keys:
         chosen = key.chosen(choices)
-        chosen_source = None
-        for value in key.values:
-            for variant in in_package(value.file):
-                if value is chosen:
-                    chosen_source = result[variant]
-                del result[variant]
         if chosen is None:
             continue  # nothing selectable: the original, if any, stays as it is
-        originals = in_package(key.original)
-        if chosen_source is None:
+        originals = [
+            target
+            for target in by_name.get(key.original.casefold(), [])
+            if key.original.casefold() not in variants
+        ]
+        sources = by_name.get(chosen.file.casefold(), [])
+        if not sources:
             # Packages often ship the default only as the original file, not as a variant.
             if not (originals and chosen is key.value(key.default)):
                 warnings.append(f"option {key.id}: variant file {chosen.file!r} is missing")
             continue
-        result[originals[0] if originals else f"{folder}/{key.original}"] = chosen_source
+        for target in originals or [f"{folder}/{key.original}"]:
+            result[target] = mapping[sources[0]]
     return result, warnings

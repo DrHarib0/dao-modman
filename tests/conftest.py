@@ -77,6 +77,49 @@ OVERRIDE_CONFIG = """<?xml version="1.0" encoding="UTF-8"?>
 """
 
 
+SHARED_CONFIG = """<?xml version="1.0" encoding="UTF-8"?>
+<OverrideConfig>
+  <Section_0 Name="Human">
+    <Key_0 Name="Skin" DefaultValue="Plain" OriginalFile="HF_d.dds">
+      <Value_0 Value="Plain" OptionsFile="(plain)skin.dds"></Value_0>
+      <Value_1 Value="Tattoo" OptionsFile="(tattoo)skin.dds"></Value_1>
+    </Key_0>
+  </Section_0>
+  <Section_1 Name="Elf">
+    <Key_0 Name="Skin" DefaultValue="Plain" OriginalFile="EF_d.dds">
+      <Value_0 Value="Plain" OptionsFile="(plain)skin.dds"></Value_0>
+      <Value_1 Value="Tattoo" OptionsFile="(tattoo)skin.dds"></Value_1>
+    </Key_0>
+  </Section_1>
+  <Section_2 Name="Dwarf">
+    <Key_0 Name="Skin" DefaultValue="Plain" OriginalFile="DF_d.dds">
+      <Value_0 Value="Plain" OptionsFile="(plain)skin.dds"></Value_0>
+      <Value_1 Value="Tattoo" OptionsFile="(tattoo)skin.dds"></Value_1>
+    </Key_0>
+  </Section_2>
+</OverrideConfig>
+"""
+
+
+def make_shared_override(path: Path, name: str = "Skins") -> Path:
+    """A package in which three options draw on the same two variant files."""
+    base = f"BioWare/Dragon Age/packages/core/override/{name}"
+    return make_zip(
+        path,
+        {
+            "Manifest.xml": OVERRIDE_MANIFEST.format(name=name),
+            f"{base}/OverrideConfig.xml": SHARED_CONFIG,
+            f"{base}/Default/HF_d.dds": "original human",
+            f"{base}/Default/EF_d.dds": "original elf",
+            f"{base}/Default/DF_d.dds": "original dwarf",
+            f"{base}/Default/hf.mao": "material",
+            f"{base}/Options/(plain)skin.dds": "plain skin",
+            f"{base}/Options/(tattoo)skin.dds": "tattoo skin",
+            f"{base}/Options/(unused)extra.dds": "listed by no option",
+        },
+    )
+
+
 def make_override(path: Path, name: str = "Bodies", *, config: bool = True) -> Path:
     """An override package: originals for Body and Skin, variants in a subfolder.
 

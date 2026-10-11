@@ -239,3 +239,41 @@ def test_broken_nested_package_fails_the_import(tmp_path: Path, library: Library
     archive = make_zip(tmp_path / "bad.zip", {"Broken.override": "not a zip"})
     with pytest.raises(LibraryError):
         library.import_archive(archive)
+
+
+def test_options_may_share_variant_files(tmp_path: Path, library: Library) -> None:
+    """Real packages use one variant file for several options; none may lose its file."""
+    from .conftest import make_shared_override
+
+    mod = library.import_archive(make_shared_override(tmp_path / "Skins.override"))
+    files_dir = library.files_dir(mod.id)
+
+    def deployed() -> dict[str, str]:
+        base = "packages/core/override/Skins/"
+        return {
+            target.removeprefix(base): (files_dir / source).read_text()
+            for target, source in library.targets(mod).items()
+        }
+
+    everything_plain = {
+        "Default/HF_d.dds": "plain skin",
+        "Default/EF_d.dds": "plain skin",
+        "Default/DF_d.dds": "plain skin",
+        "Default/hf.mao": "material",
+        "Options/(unused)extra.dds": "listed by no option",  # not a variant of any option
+    }
+    assert deployed() == everything_plain
+    assert deploy.build_plan(library).warnings == []
+
+    keys = {key.id: key for o in library.options(mod) for key in o.keys}
+    library.set_option(mod, keys["Elf/Skin"], "Tattoo")
+    assert deployed() == {**everything_plain, "Default/EF_d.dds": "tattoo skin"}
+    library.set_option(mod, keys["Human/Skin"], "Tattoo")
+    library.set_option(mod, keys["Dwarf/Skin"], "Tattoo")
+    assert deployed() == {
+        **everything_plain,
+        "Default/HF_d.dds": "tattoo skin",
+        "Default/EF_d.dds": "tattoo skin",
+        "Default/DF_d.dds": "tattoo skin",
+    }
+    assert deploy.build_plan(library).warnings == []
