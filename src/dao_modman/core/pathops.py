@@ -6,8 +6,17 @@ from collections.abc import Callable
 from fnmatch import fnmatchcase
 from typing import TypeVar
 
-from . import dazip
-from .models import KIND_DAZIP, KIND_MIXED, KIND_OVERRIDE, OP_REMOVE, OP_RENAME, Mod, PathOp
+from . import dazip, overridepkg
+from .models import (
+    KIND_DAZIP,
+    KIND_MIXED,
+    KIND_OVERRIDE,
+    KIND_PACKAGE,
+    OP_REMOVE,
+    OP_RENAME,
+    Mod,
+    PathOp,
+)
 from .paths import normalize_rel
 
 T = TypeVar("T")
@@ -24,14 +33,27 @@ class PathOpError(Exception):
 Ignored = Callable[[str], bool]
 
 
+def package_roots(files: list[str]) -> tuple[dict[str, str], dict[str, str]]:
+    """`(dazip roots, override package roots)`: folder -> path of its Manifest.xml."""
+    dazips = dazip.roots(files)
+    packages = {
+        folder: manifest
+        for folder, manifest in overridepkg.roots(files).items()
+        if folder not in dazips
+    }
+    return dazips, packages
+
+
 def default_mapping(mod: Mod, files: list[str], ignored: Ignored | None = None) -> dict[str, str]:
     """Map target path (relative to the game user dir) -> file inside `mods/<id>/files/`.
 
-    Files of a dazip go where its `Contents/` folder says; whatever else is in the dazip
-    (Manifest.xml, extras) is not installed. Files outside any dazip are loose override
+    Files of a dazip go where its `Contents/` folder says, files of an override package
+    where its `BioWare/Dragon Age/` folder says; whatever else is in such a package
+    (Manifest.xml, extras) is not installed. Files outside any package are loose override
     files. Ignored files are left out altogether.
     """
-    roots = dazip.roots(files)
+    dazips, packages = package_roots(files)
+    roots = {**dazips, **packages}
     mapping: dict[str, str] = {}
     for rel in files:
         if ignored is not None and ignored(rel):
@@ -39,23 +61,34 @@ def default_mapping(mod: Mod, files: list[str], ignored: Ignored | None = None) 
         root = dazip.owner(roots, rel)
         if root is None:
             mapping[f"{OVERRIDE_DIR}/{mod.id}/{rel}"] = rel
-            continue
-        head, _, rest = rel[len(root) + 1 if root else 0 :].partition("/")
-        if head.casefold() == dazip.CONTENTS and rest:
-            mapping[rest] = rel
+        elif root in packages:
+            if target := overridepkg.target(root, rel):
+                mapping[target] = rel
+        else:
+            head, _, rest = rel[len(root) + 1 if root else 0 :].partition("/")
+            if head.casefold() == dazip.CONTENTS and rest:
+                mapping[rest] = rel
     return mapping
 
 
 def kind(files: list[str], ignored: Ignored | None = None) -> str:
-    """What a mod consists of: dazip(s), loose override files, or both.
+    """What a mod consists of: dazip(s), override package(s), loose override files, or a mix.
 
     Ignored files do not count as loose files: a dazip shipped with a readme is still a dazip.
     """
-    roots = dazip.roots(files)
-    if not roots:
-        return KIND_OVERRIDE
-    loose = (rel for rel in files if dazip.owner(roots, rel) is None)
-    return KIND_MIXED if any(not (ignored and ignored(rel)) for rel in loose) else KIND_DAZIP
+    dazips, packages = package_roots(files)
+    roots = {**dazips, **packages}
+    loose = any(dazip.owner(roots, rel) is None and not (ignored and ignored(rel)) for rel in files)
+    kinds = [
+        kind
+        for kind, present in (
+            (KIND_DAZIP, bool(dazips)),
+            (KIND_PACKAGE, bool(packages)),
+            (KIND_OVERRIDE, loose or not roots),
+        )
+        if present
+    ]
+    return kinds[0] if len(kinds) == 1 else KIND_MIXED
 
 
 def _is_glob(pattern: str) -> bool:

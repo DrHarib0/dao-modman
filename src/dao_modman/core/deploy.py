@@ -178,7 +178,7 @@ def build_plan(library: Library) -> Plan:
         if not entry.enabled:
             continue
         files_dir = library.files_dir(mod.id)
-        targets = library.targets(mod)
+        targets = library.targets(mod, plan.warnings)
         for target, source in targets.items():
             planned = PlannedFile(normalize_rel(target), files_dir / source, mod.id)
             scope = _override_scope(planned.target)

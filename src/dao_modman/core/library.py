@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import contextlib
 import re
 import shutil
 import tempfile
 from collections.abc import Iterable
+from dataclasses import dataclass
 from pathlib import Path
 
 from . import archive as archives
-from . import dazip, metadata, pathops
+from . import dazip, metadata, overridepkg, pathops
 from .dazip import AddIn
 from .ignore import DEFAULT_PATTERNS, IgnoreRules
 from .models import (
@@ -20,6 +22,7 @@ from .models import (
     Profile,
     ProfileEntry,
 )
+from .overridepkg import OptionKey
 from .paths import Dirs
 
 FILES_DIR = "files"
@@ -27,6 +30,15 @@ FILES_DIR = "files"
 
 class LibraryError(Exception):
     pass
+
+
+@dataclass
+class PackageOptions:
+    """The options of one override package inside a mod."""
+
+    root: str  # the package's folder inside the mod's files ("" = top level)
+    folder: str  # target folder of its OverrideConfig.xml, relative to the game user dir
+    keys: list[OptionKey]
 
 
 def slugify(name: str) -> str:
@@ -93,15 +105,55 @@ class Library:
     def ordered(self) -> list[tuple[ProfileEntry, Mod]]:
         return [(entry, self.mods[entry.id]) for entry in self.profile.mods]
 
-    def targets(self, mod: Mod) -> dict[str, str]:
-        """Target path -> source file (relative to the mod's files dir), with ops applied."""
-        files = archives.list_files(self.files_dir(mod.id))
-        return pathops.resolve(mod, files, self.ignore.matches)
+    def options(self, mod: Mod, problems: list[str] | None = None) -> list[PackageOptions]:
+        """The option sets of the mod's override packages (one per OverrideConfig.xml)."""
+        files_dir = self.files_dir(mod.id)
+        files = archives.list_files(files_dir)
+        if not any(rel.rpartition("/")[2].casefold() == overridepkg.CONFIG for rel in files):
+            return []
+        _dazips, packages = pathops.package_roots(files)
+        found = []
+        for rel in files:
+            root = dazip.owner(packages, rel)
+            if root is None or rel.rpartition("/")[2].casefold() != overridepkg.CONFIG:
+                continue
+            payload = rel[len(root) + 1 if root else 0 :].split("/")[2:-1]
+            try:
+                keys = overridepkg.parse_config(files_dir / rel)
+            except overridepkg.OverridePkgError as exc:
+                if problems is not None:
+                    problems.append(f"{mod.id}: {exc}")
+                continue
+            found.append(PackageOptions(root, "/".join(payload), keys))
+        return found
 
-    def default_targets(self, mod: Mod) -> dict[str, str]:
-        """Like `targets`, but before the mod's path operations."""
+    def default_targets(self, mod: Mod, problems: list[str] | None = None) -> dict[str, str]:
+        """Target path -> source file, before the mod's path operations.
+
+        Options of override packages are resolved here, so path operations see one file per
+        option and never the unused variants.
+        """
         files = archives.list_files(self.files_dir(mod.id))
-        return pathops.default_mapping(mod, files, self.ignore.matches)
+        mapping = pathops.default_mapping(mod, files, self.ignore.matches)
+        for package in self.options(mod, problems):
+            mapping, warnings = overridepkg.apply_options(
+                mapping, package.keys, mod.options, package.root, package.folder
+            )
+            if problems is not None:
+                problems += [f"{mod.id}: {warning}" for warning in warnings]
+        return mapping
+
+    def targets(self, mod: Mod, problems: list[str] | None = None) -> dict[str, str]:
+        """Target path -> source file (relative to the mod's files dir), with ops applied."""
+        return pathops.apply_ops(self.default_targets(mod, problems), mod.ops)
+
+    def set_option(self, mod: Mod, key: OptionKey, label: str) -> None:
+        """Choose a value for an option; the package default is not stored."""
+        mod.options = {k: v for k, v in mod.options.items() if k.casefold() != key.id.casefold()}
+        value = key.value(label)
+        if value is not None and value is not key.value(key.default):
+            mod.options[key.id] = value.label
+        self.save_mod(mod)
 
     def addins(self, mod: Mod, targets: dict[str, str] | None = None) -> list[AddIn]:
         """The mod's AddIns to register: those whose dazip still has files to deploy."""
@@ -127,12 +179,12 @@ class Library:
         return candidate
 
     def _stage(self, archive: Path, stage: Path) -> Path:
-        """Extract into `stage/files`, unpacking every dazip inside into a folder of its name."""
+        """Extract into `stage/files`; packages inside become folders of the same name."""
         files = stage / FILES_DIR
         archives.extract(archive, files)
         for nested in archives.list_files(files):
-            if nested.lower().endswith(".dazip"):
-                unpacked = stage / "dazip"
+            if nested.lower().endswith((".dazip", ".override")):
+                unpacked = stage / "unpacked"
                 archives.extract(files / nested, unpacked)
                 (files / nested).unlink()
                 unpacked.rename(files / nested)
@@ -169,6 +221,12 @@ class Library:
         if len(addins) == 1:  # a mod that is one AddIn is best described by it
             mod.name = name or addins[0].name
             mod.version = version or addins[0].version
+        packages = pathops.package_roots(listing)[1]
+        if not addins and len(packages) == 1:  # likewise for a single override package
+            with contextlib.suppress(overridepkg.OverridePkgError):
+                package = overridepkg.parse_manifest(files / next(iter(packages.values())))
+                mod.name = name or package.name or mod.name
+                mod.version = version or package.version
 
     def import_archive(
         self,

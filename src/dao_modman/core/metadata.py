@@ -86,6 +86,8 @@ def mod_to_dict(mod: Mod) -> dict[str, Any]:
             {"mod": overwrite.mod, **({"files": overwrite.files} if overwrite.files else {})}
             for overwrite in mod.overwrites
         ]
+    if mod.options:
+        data["options"] = dict(mod.options)
     return data
 
 
@@ -118,6 +120,7 @@ def mod_from_dict(raw: dict[str, Any]) -> Mod:
             Overwrite(str(entry["mod"]), [str(name) for name in entry.get("files", [])])
             for entry in raw.get("overwrites", [])
         ]
+        mod.options = {str(k): str(v) for k, v in raw.get("options", {}).items()}
     except (KeyError, ValueError, TypeError) as exc:
         raise MetadataError(f"invalid mod metadata: {exc}") from exc
     if "/" in mod.id:

@@ -8,7 +8,8 @@ from fnmatch import fnmatchcase
 
 KIND_DAZIP = "dazip"
 KIND_OVERRIDE = "override"
-KIND_MIXED = "mixed"  # dazip(s) plus loose override files
+KIND_PACKAGE = "package"  # override package(s) in DAO-Modmanager's .override format
+KIND_MIXED = "mixed"  # more than one of: dazips, override packages, loose override files
 
 OP_REMOVE = "remove"
 OP_RENAME = "rename"
@@ -76,6 +77,8 @@ class Mod:
     addin_uids: list[str] = field(default_factory=list)
     ops: list[PathOp] = field(default_factory=list)
     overwrites: list[Overwrite] = field(default_factory=list)
+    # choices for an override package's options: "Section/Key" -> value label
+    options: dict[str, str] = field(default_factory=dict)
 
     def may_overwrite(self, mod_id: str, name: str) -> bool:
         return any(overwrite.covers(mod_id, name) for overwrite in self.overwrites)

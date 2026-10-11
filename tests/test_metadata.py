@@ -29,6 +29,7 @@ def test_mod_round_trip(tmp_path: Path) -> None:
         addin_uids=["uid1"],
         ops=[PathOp("remove", "docs"), PathOp("rename", "a/b", "c/d")],
         overwrites=[Overwrite("other-mod", ["a.gda", "abi_*.gda"]), Overwrite("whole-mod")],
+        options={"Human Females/Hand Size": "NB big"},
     )
     metadata.save_mod(tmp_path, mod)
     assert metadata.load_mod(tmp_path) == mod
