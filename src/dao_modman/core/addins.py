@@ -52,7 +52,7 @@ def classify(addin: AddIn, managed: set[str], shipped: set[str]) -> str:
     downloaded into the user dir (non-Ultimate editions). Our own mods are ruled out first,
     so a mod claiming to be BioWare content is not mistaken for DLC.
     """
-    if addin.uid in managed:
+    if addin.uid.casefold() in {uid.casefold() for uid in managed}:
         return MANAGED
     if addin.uid.casefold() in shipped or addin.bioware:
         return OFFICIAL
@@ -79,13 +79,14 @@ def register(addins_xml: Path, addins: list[AddIn]) -> list[str]:
     if not addins:
         return []
     root = _load(addins_xml)
-    present = {item.get("UID") for item in root.iter("AddInItem")}
+    # The game treats UIDs case-insensitively: "MyAddIn" and "myaddin" are the same AddIn.
+    present = {(item.get("UID") or "").casefold() for item in root.iter("AddInItem")}
     added = []
     for addin in addins:
-        if addin.uid in present:
+        if addin.uid.casefold() in present:
             continue
         root.append(copy.deepcopy(addin.element))
-        present.add(addin.uid)
+        present.add(addin.uid.casefold())
         added.append(addin.uid)
     if added:
         _save(addins_xml, root)
@@ -98,8 +99,9 @@ def unregister(addins_xml: Path, uids: list[str]) -> list[str]:
         return []
     root = _load(addins_xml)
     removed = []
+    wanted = {uid.casefold() for uid in uids}
     for item in list(root.findall("AddInItem")):
-        if item.get("UID") in uids:
+        if (item.get("UID") or "").casefold() in wanted:
             root.remove(item)
             removed.append(item.get("UID"))
     if removed:

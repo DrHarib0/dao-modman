@@ -89,3 +89,26 @@ def test_classify(game: tuple[Path, Path]) -> None:
     # a mod of ours that claims to be BioWare content is still ours
     assert kind("pretender") == addins.OFFICIAL
     assert kind("pretender", managed={"pretender"}) == addins.MANAGED
+
+
+def test_uids_are_compared_ignoring_case(tmp_path: Path) -> None:
+    """A UID already registered in other casing must not get a second entry."""
+    import xml.etree.ElementTree as ET
+
+    from dao_modman.core.dazip import addin_from_element
+
+    path = tmp_path / "addins.xml"
+    path.write_text('<AddInsList><AddInItem UID="Phae_MainModule" /></AddInsList>')
+    new = [
+        addin_from_element(ET.fromstring(f'<AddInItem UID="{uid}" />'))
+        for uid in ("phae_mainmodule", "phae_twforgedaa", "PHAE_TWFORGEDAA")
+    ]
+    assert addins.register(path, new) == ["phae_twforgedaa"]
+
+    def registered() -> list[str]:
+        return [item.get("UID") for item in ET.parse(path).getroot()]
+
+    assert registered() == ["Phae_MainModule", "phae_twforgedaa"]
+    assert addins.classify(new[0], {"PHAE_MAINMODULE"}, set()) == addins.MANAGED
+    assert addins.unregister(path, ["PHAE_TwForgeDAA"]) == ["phae_twforgedaa"]
+    assert registered() == ["Phae_MainModule"]
