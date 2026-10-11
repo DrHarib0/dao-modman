@@ -22,6 +22,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
     uv run dao-modman install-nxm-handler  # register as nxm:// handler
     uv run dao-modman laa status|patch|restore   # Large Address Aware patch, see below
     uv run dao-modman console status|enable|disable   # developer console, see below
+    uv run dao-modman revisions init       # keep a git history of the library's metadata
     uv run dao-modman conflicts            # which mods ship the same files, and who wins
     uv run dao-modman conflicts accept NAME ... | --all   # mark conflicts as intended
 
@@ -156,8 +157,18 @@ are not on it.
 - `chargenmorphcfg.xml` is the exception: when several enabled mods ship one, their entries
   are merged into a single `packages/core/override/chargenmorphcfg.xml` (what the
   CharGenMorph Compiler does) and the individual copies are not deployed.
-- Every deployed file is recorded with its SHA-256. Unapply deletes only files that are still
-  unchanged; files that existed before or were edited are left alone.
+- Every deployed file is recorded with its SHA-256. A file that already exists in the game
+  directory is never overwritten; apply reports how many it left untouched.
+- **Apply is all or nothing.** Before copying, it notes what it is about to create. If it
+  fails, everything from that run is removed again and nothing is applied; if the process is
+  killed, the next start rolls the unfinished run back the same way. (Apply first removes the
+  previous deployment, so after a failure that one is gone too.) Apply and unapply show a
+  progress dialog and cannot be interrupted from the keyboard.
+- **Unapply** removes the files it applied that are still unchanged. If the mod directories
+  (`packages/` and `AddIns/` in the game's user dir) contain anything else, such as files
+  changed since, files installed by hand or by another tool, or AddIns those registered, it
+  asks: `y` removes everything (cannot be undone), `o` only dao-modman's files, `n` cancels.
+  Official DLC stored there is never touched.
 - dazip AddIns are added to / removed from `Settings/AddIns.xml`.
 
 ### Override packages
@@ -223,6 +234,18 @@ A rule is kept when the mod it names is removed, since removal is often temporar
 does nothing, and is listed in the report as an unused rule so that it does not come back
 unnoticed when the mod is installed again; `a` on it in the dialog drops it.
 
+## Library revisions
+
+A debugging aid: `dao-modman revisions init` turns the data directory into a git repository.
+From then on every change to the library's metadata is committed there with the action as
+its message ("disable some-mod", "bodies: set option Humans/Body = Big", "apply: 2862
+files"), so it is possible to see afterwards what changed when:
+
+    git -C ~/.local/share/dao-modman log --stat
+
+Only `mod.toml` files, `profile.toml` and `deployed.json` are tracked, never archives or
+extracted mod files. There is no restore. To stop, delete the `.git` folder there.
+
 ## Official DLC and other AddIns
 
 The game's `Settings/addins.xml` already lists its own DLC, and dazip mods are registered in
@@ -285,7 +308,8 @@ automatically (a rename operation in its `mod.toml`).
         install.py     # download + import, in-place updates, MD5 lookup
         addins.py      # Settings/AddIns.xml
         chargen.py     # chargenmorphcfg.xml merging
-        deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply
+        deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply, clean
+        revisions.py   # git history of the library's metadata
         report.py      # conflict report
         laa.py         # LAA patch for the game executable
         launch.py      # start the game through Steam
