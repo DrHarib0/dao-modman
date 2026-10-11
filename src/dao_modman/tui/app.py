@@ -177,6 +177,14 @@ class ModManApp(App[None]):
         style = "" if enabled else "dim"
         return [Text(cell, style=style) for cell in (number, ENABLED if enabled else "", *rest)]
 
+    def _overwrites_note(self, mod: Mod) -> str:
+        """Names the mod this one is declared to overwrite, or counts them if several."""
+        targets = list(dict.fromkeys(overwrite.mod for overwrite in mod.overwrites))
+        if len(targets) != 1:
+            return f"overwrites {len(targets)} mods"
+        other = self.library.mods.get(targets[0])
+        return f"overwrites {other.name if other else targets[0] + ' (missing)'}"
+
     def refresh_table(self, select: str | None = None) -> None:
         table = self.query_one("#mods", DataTable)
         selected = select or (entry.id if (entry := self.current_entry()) else None)
@@ -201,6 +209,7 @@ class ModManApp(App[None]):
                     ("wrong order", mod.id in misordered),
                     ("conflict", entry.enabled and mod.id in conflicting),
                     ("update", mod.id in self.updates),
+                    (self._overwrites_note(mod), bool(mod.overwrites)),
                 )
                 if active
             ]

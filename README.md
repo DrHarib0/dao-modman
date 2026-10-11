@@ -157,7 +157,8 @@ can declare that in its `mod.toml`:
     files = ["abi_coneofcold.gda"]    # names or globs, ignoring case; leave out for every file
 
 A conflict is **accepted** when the winner covers every other mod that ships the file; it
-then no longer shows as `conflict`. If the load order changes so that the declaring mod loads
+then no longer shows as `conflict`. A mod with such rules shows `overwrites <mod>` in the
+`Notes` column (or the number of mods, if several). If the load order changes so that the declaring mod loads
 *before* the other one, the overwrite does not happen: the mods are marked `wrong order` in
 red, the report says so, and `dao-modman conflicts` exits with status 1.
 

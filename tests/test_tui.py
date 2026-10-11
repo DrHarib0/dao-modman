@@ -731,11 +731,11 @@ async def test_accepting_overwrites_in_the_conflicts_dialog(
 
         await pilot.press("escape")
         await pilot.pause()
-        assert notes(app) == ["", ""]
+        assert notes(app) == ["", "overwrites Alpha"]  # the rule is visible on the winner
 
         # reversing the load order turns the accepted overwrite into an error
         await pilot.press("J")
-        assert notes(app) == ["wrong order", "wrong order"]
+        assert notes(app) == ["wrong order, overwrites Alpha", "wrong order"]
         await pilot.press("v", "a")  # cannot be accepted away
         tree = app.screen.query_one(Tree)
         assert lines()[0].startswith("#1 Beta  <  #2 Alpha")
@@ -770,3 +770,22 @@ async def test_unused_overwrite_rules_can_be_dropped(
         await pilot.press("down", "a")
         assert list(app.screen.query_one(Tree).root.children) == []
     assert Library(dirs).mods["alpha"].overwrites == []
+
+
+async def test_notes_show_overwrite_rules(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    from dao_modman.core.models import Overwrite
+
+    library = Library(dirs)
+    for name in ("Alpha", "Beta", "Gamma"):
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", {f"{name}.erf": name}))
+    library.mods["beta"].overwrites = [Overwrite("alpha", ["x.gda"]), Overwrite("alpha", ["y.gda"])]
+    library.mods["gamma"].overwrites = [Overwrite("alpha"), Overwrite("removed-mod")]
+    for mod in library.mods.values():
+        library.save_mod(mod)
+
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)):
+        assert [row[8] for row in rows(app)] == ["", "overwrites Alpha", "overwrites 2 mods"]
+        app.library.mods["gamma"].overwrites.pop(0)
+        app.refresh_table()
+        assert rows(app)[2][8] == "overwrites removed-mod (missing)"
