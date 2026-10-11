@@ -72,7 +72,7 @@ async def test_toggle_move_and_group(tmp_path: Path, dirs: Dirs, user_dir: Path)
 
 
 async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
-    archive = make_zip(tmp_path / "mod.zip", {"a.erf": "a", "docs/readme.txt": "r"})
+    archive = make_zip(tmp_path / "mod.zip", {"a.erf": "a", "docs/extra.erf": "r"})
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("i")
@@ -418,7 +418,7 @@ async def test_path_tree_folding_and_filter(tmp_path: Path, dirs: Dirs, user_dir
             tmp_path / "mod.zip",
             {
                 "a.erf": "a",
-                "docs/readme.txt": "r",
+                "docs/notes.gda": "r",
                 "docs/img/Pic.dds": "p",
                 "textures/big.dds": "b",
             },
@@ -503,7 +503,7 @@ async def test_path_tree_folding_and_filter(tmp_path: Path, dirs: Dirs, user_dir
         await pilot.press("escape")
         await pilot.pause()
         assert app.screen is screen and not box.display
-        assert files() == ["a.erf", "docs/readme.txt", "textures/big.dds"]
+        assert files() == ["a.erf", "docs/notes.gda", "textures/big.dds"]
         await pilot.press("s")
         await pilot.pause()
 

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from dao_modman.core.ignore import IgnoreRules
 from dao_modman.core.models import Mod, PathOp
 from dao_modman.core.pathops import (
     PathOpError,
@@ -48,12 +49,37 @@ def test_default_mapping_with_several_dazips_and_loose_files() -> None:
 
 
 def test_kind() -> None:
+    ignored = IgnoreRules().matches
     dazip = ["X.dazip/Manifest.xml", "X.dazip/Contents/addins/x/a.erf"]
-    assert kind(["a.erf", "docs/readme.txt"]) == "override"
-    assert kind(["Manifest.xml", "Contents/a.erf", "readme.txt"]) == "dazip"
-    assert kind([*dazip, "ReadMe.TXT", "manual.pdf", "docs/README"]) == "dazip"
-    assert kind([*dazip, "readme.txt", "textures/t.dds"]) == "mixed"
-    assert kind([*dazip, "X.dazip/extra.erf"]) == "dazip"  # inside the dazip, not loose
+    assert kind(["a.erf", "docs/readme.txt"], ignored) == "override"
+    assert kind(["Manifest.xml", "Contents/a.erf", "readme.txt"], ignored) == "dazip"
+    assert kind([*dazip, "ReadMe.TXT", "manual.pdf", "docs/README"], ignored) == "dazip"
+    assert kind([*dazip, "readme.txt", "textures/t.dds"], ignored) == "mixed"
+    assert kind([*dazip, "X.dazip/extra.erf"], ignored) == "dazip"  # inside the dazip, not loose
+    links = ["z - Manual.URL", "preview.JPG", "shots/1.png", "notes.docx", "page.html"]
+    assert kind([*dazip, *links], ignored) == "dazip"
+    assert kind([*dazip, "tex.dds"], ignored) == "mixed"  # textures are game files
+    assert kind([*dazip, "chargenmorphcfg.xml"], ignored) == "mixed"
+    assert kind([*dazip, "readme.txt"]) == "mixed"  # without rules, every loose file counts
+
+
+def test_default_mapping_leaves_ignored_files_out() -> None:
+    mod = Mod(id="m", name="M")
+    files = ["a.erf", "readme.txt", "X.dazip/Manifest.xml", "X.dazip/Contents/addins/x/notes.txt"]
+    files += ["X.dazip/Contents/addins/x/b.erf"]
+    assert default_mapping(mod, files, IgnoreRules().matches) == {
+        "packages/core/override/m/a.erf": "a.erf",
+        "addins/x/b.erf": "X.dazip/Contents/addins/x/b.erf",
+    }
+
+
+def test_ignore_rules() -> None:
+    rules = IgnoreRules(["*.TXT", "/top/", "docs/", "!docs/keep.erf", "*readme*"])
+    for path in ("a.txt", "x/y/B.Txt", "top/a.erf", "x/docs/a.erf", "Docs/a.erf", "x/ReadMe_de"):
+        assert rules.matches(path), path
+    for path in ("a.erf", "x/top/a.erf", "docs.erf"):
+        assert not rules.matches(path), path
+    assert not IgnoreRules([]).matches("readme.txt")
 
 
 def test_matches() -> None:

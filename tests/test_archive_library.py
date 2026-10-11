@@ -83,10 +83,9 @@ def test_import_override(tmp_path: Path, library: Library) -> None:
     assert archive.is_file()  # original left in place
     assert mod.archive.sha256 == archives.sha256_file(archive)
     assert metadata.load_mod(library.dirs.mods / mod.id) == mod
-    assert library.targets(mod) == {
-        "packages/core/override/nice-hair/docs/readme.txt": "docs/readme.txt",
-        "packages/core/override/nice-hair/hair.mmh": "hair.mmh",
-    }
+    # the readme is an ignored file: kept in the library, never deployed
+    assert (library.files_dir(mod.id) / "docs/readme.txt").is_file()
+    assert library.targets(mod) == {"packages/core/override/nice-hair/hair.mmh": "hair.mmh"}
     assert [entry.id for entry in library.profile.mods] == ["nice-hair"]
     # survives a reload from disk
     assert Library(library.dirs).mods == {mod.id: mod}
@@ -131,14 +130,13 @@ def test_import_archive_with_several_dazips(tmp_path: Path, library: Library) ->
         {"One.dazip": one.read_bytes(), "Two.DAZIP": two.read_bytes(), "readme.txt": "r"},
     )
     mod = library.import_archive(archive)
-    # the readme is the only loose file, and documents do not make a mod "mixed"
+    # the readme is the only loose file, and ignored files do not make a mod "mixed"
     assert (mod.id, mod.name, mod.kind) == ("dog-pack", "Dog Pack", KIND_DAZIP)
     assert mod.addin_uids == ["dog_talents", "dog_class"]
     assert [addin.uid for addin in library.addins(mod)] == ["dog_talents", "dog_class"]
     assert sorted(library.targets(mod)) == [
         "addins/dog_class/module/data/a.gda",
         "addins/dog_talents/module/data/a.gda",
-        "packages/core/override/dog-pack/readme.txt",
         "packages/core/override/dog_class/b.erf",
         "packages/core/override/dog_talents/b.erf",
     ]

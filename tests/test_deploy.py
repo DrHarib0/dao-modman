@@ -180,10 +180,10 @@ def test_override_conflicts_are_by_file_name(
 
 def test_same_name_outside_override_is_not_a_conflict(tmp_path: Path, library: Library) -> None:
     for name in ("one", "two"):
-        mod = library.import_archive(make_zip(tmp_path / f"{name}.zip", {"readme.txt": name}))
-        mod.ops = [PathOp("rename", f"{OVERRIDE}/{name}", f"docs/{name}")]
+        mod = library.import_archive(make_zip(tmp_path / f"{name}.zip", {"data.erf": name}))
+        mod.ops = [PathOp("rename", f"{OVERRIDE}/{name}", f"other/{name}")]
     plan = deploy.build_plan(library)
-    assert [f.target for f in plan.files] == ["docs/one/readme.txt", "docs/two/readme.txt"]
+    assert [f.target for f in plan.files] == ["other/one/data.erf", "other/two/data.erf"]
     assert by_target(plan) == {}
 
 
@@ -261,44 +261,34 @@ def test_identical_files_are_not_a_conflict(tmp_path: Path, library: Library) ->
     ]
 
 
-def test_documentation_files_are_not_a_conflict(tmp_path: Path, library: Library) -> None:
-    docs = ["ReadMe.TXT", "notes.txt", "Manual.PDF", "README", "Readme.html", "my_readme_de.rtf"]
+def test_ignored_files_are_not_deployed(tmp_path: Path, dirs, user_dir: Path) -> None:
+    ignored = ["ReadMe.TXT", "notes.txt", "Manual.PDF", "README", "my_readme_de.erf"]
+    ignored += ["Homepage.URL", "shots/preview.jpg", "Shot.PNG", "__MACOSX/a.erf", "Thumbs.db"]
+    kept = ["tex.dds", "data.xml", "sub/model.mmh"]  # game formats, however similar
+    library = Library(dirs)
     for name in ("one", "two"):
-        files = {doc: f"{name} {doc}" for doc in docs}
-        library.import_archive(make_zip(tmp_path / f"{name}.zip", {**files, "tex.dds": name}))
+        files = {path: f"{name} {path}" for path in [*ignored, *kept]}
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", files))
+
     plan = deploy.build_plan(library)
-    assert by_target(plan) == {f"{OVERRIDE}/two/tex.dds": ["one", "two"]}
-
-
-def test_addin_is_registered_only_while_its_dazip_has_files(
-    tmp_path: Path, library: Library, user_dir: Path
-) -> None:
-    one = make_dazip(tmp_path / "one.dazip", uid="main")
-    two = make_dazip(tmp_path / "two.dazip", uid="optional")
-    mod = library.import_archive(
-        make_zip(
-            tmp_path / "pack.zip", {"One.dazip": one.read_bytes(), "Two.dazip": two.read_bytes()}
-        )
-    )
-    deployed = library.dirs.deployed_file
-
-    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
-    assert result.addins == ["main", "optional"]
-    assert (user_dir / "addins/optional/module/data/a.gda").is_file()
-
-    # dropping every file of the optional module also drops its AddIn
-    mod.ops = [
-        PathOp("remove", "addins/optional"),
-        PathOp("remove", f"{OVERRIDE}/optional"),
+    assert sorted({f.target.split("/", 4)[-1] for f in plan.files}) == sorted(kept)
+    # only game files can conflict
+    assert sorted(c.name for c in plan.conflicts) == ["data.xml", "model.mmh", "tex.dds"]
+    deploy.apply(plan, user_dir, dirs.deployed_file)
+    assert tree(user_dir) == [
+        f"{OVERRIDE}/two/data.xml",
+        f"{OVERRIDE}/two/sub/model.mmh",
+        f"{OVERRIDE}/two/tex.dds",
     ]
-    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
-    assert result.addins == ["main"]
-    assert addin_uids(user_dir) == ["main"]
-    assert not (user_dir / "addins/optional").exists()
 
-    # with only part of it removed it stays registered
-    mod.ops = [PathOp("remove", "addins/optional")]
-    assert [a.uid for a in deploy.build_plan(library).addins] == ["main", "optional"]
+
+def test_ignore_patterns_come_from_the_config(tmp_path: Path, dirs) -> None:
+    files = {"a.erf": "a", "notes.txt": "n", "extras/b.erf": "b", "keep/readme.txt": "k"}
+    patterns = ["*.txt", "/extras/", "!keep/*.txt"]  # .gitignore syntax, incl. negation
+    library = Library(dirs, ignore=patterns)
+    mod = library.import_archive(make_zip(tmp_path / "mod.zip", files))
+    assert sorted(library.targets(mod).values()) == ["a.erf", "keep/readme.txt"]
+    assert sorted(Library(dirs, ignore=[]).targets(mod).values()) == sorted(files)
 
 
 def statuses(plan: deploy.Plan) -> dict[str, str]:

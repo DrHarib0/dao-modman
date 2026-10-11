@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import dotenv_values
 
 from . import ipc, paths
+from .ignore import DEFAULT_PATTERNS
 from .paths import Dirs
 
 TOKEN_VAR = "NEXUS_API_TOKEN"
@@ -24,6 +25,8 @@ class Config:
     nexus_token: str | None = None
     terminal: str | None = None  # terminal emulator for windows opened by the nxm handler
     runtime_dir: Path | None = None  # lock and socket of the running instance; None: no IPC
+    # .gitignore patterns for files inside mods that are never deployed
+    ignore: list[str] = field(default_factory=lambda: list(DEFAULT_PATTERNS))
 
 
 def load_token(config_dir: Path, cwd: Path | None = None) -> str | None:
@@ -61,4 +64,5 @@ def load_config() -> Config:
         nexus_token=load_token(config_dir),
         terminal=str(raw["terminal"]) if raw.get("terminal") else None,
         runtime_dir=ipc.runtime_dir(),
+        ignore=[str(p) for p in raw["ignore"]] if "ignore" in raw else list(DEFAULT_PATTERNS),
     )

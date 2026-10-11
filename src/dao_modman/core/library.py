@@ -5,11 +5,13 @@ from __future__ import annotations
 import re
 import shutil
 import tempfile
+from collections.abc import Iterable
 from pathlib import Path
 
 from . import archive as archives
 from . import dazip, metadata, pathops
 from .dazip import AddIn
+from .ignore import DEFAULT_PATTERNS, IgnoreRules
 from .models import (
     ArchiveInfo,
     Mod,
@@ -33,8 +35,9 @@ def slugify(name: str) -> str:
 
 
 class Library:
-    def __init__(self, dirs: Dirs) -> None:
+    def __init__(self, dirs: Dirs, ignore: Iterable[str] | None = None) -> None:
         self.dirs = dirs
+        self.ignore = IgnoreRules(DEFAULT_PATTERNS if ignore is None else ignore)
         dirs.ensure()
         self.mods: dict[str, Mod] = {}
         self.errors: list[str] = []
@@ -56,6 +59,8 @@ class Library:
             if mod.id != mod_dir.name:
                 self.errors.append(f"{mod_dir}: id {mod.id!r} does not match directory name")
                 continue
+            # the kind depends on the ignore rules, so it is worked out afresh
+            mod.kind = pathops.kind(archives.list_files(mod_dir / FILES_DIR), self.ignore.matches)
             self.mods[mod.id] = mod
         try:
             self.profile = metadata.load_profile(self.dirs.profile_file)
@@ -90,7 +95,13 @@ class Library:
 
     def targets(self, mod: Mod) -> dict[str, str]:
         """Target path -> source file (relative to the mod's files dir), with ops applied."""
-        return pathops.resolve(mod, archives.list_files(self.files_dir(mod.id)))
+        files = archives.list_files(self.files_dir(mod.id))
+        return pathops.resolve(mod, files, self.ignore.matches)
+
+    def default_targets(self, mod: Mod) -> dict[str, str]:
+        """Like `targets`, but before the mod's path operations."""
+        files = archives.list_files(self.files_dir(mod.id))
+        return pathops.default_mapping(mod, files, self.ignore.matches)
 
     def addins(self, mod: Mod, targets: dict[str, str] | None = None) -> list[AddIn]:
         """The mod's AddIns to register: those whose dazip still has files to deploy."""
@@ -152,7 +163,7 @@ class Library:
         listing = archives.list_files(files)
         roots = dazip.roots(listing)
         addins = [a for manifest in roots.values() for a in dazip.parse_manifest(files / manifest)]
-        mod.kind = pathops.kind(listing)
+        mod.kind = pathops.kind(listing, self.ignore.matches)
         mod.name, mod.version = name or mod.name, version
         mod.addin_uids = [addin.uid for addin in addins]
         if len(addins) == 1:  # a mod that is one AddIn is best described by it

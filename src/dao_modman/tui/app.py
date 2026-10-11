@@ -15,7 +15,6 @@ from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Label, ProgressBar, Static
 
 from ..core import addins, console, deploy, ipc, laa, launch, pathops, report
-from ..core import archive as archives
 from ..core.config import Config
 from ..core.dazip import AddIn
 from ..core.install import install_from_nexus, link_to_nexus
@@ -90,7 +89,7 @@ class ModManApp(App[None]):
     ) -> None:
         super().__init__()
         self.config = config
-        self.library = Library(config.dirs)
+        self.library = Library(config.dirs, config.ignore)
         self.nexus = (
             NexusClient(config.nexus_token, transport=transport) if config.nexus_token else None
         )
@@ -315,7 +314,6 @@ class ModManApp(App[None]):
         mod = self.current_mod()
         if not mod:
             return
-        files = archives.list_files(self.library.files_dir(mod.id))
 
         def done(ops: list[PathOp] | None) -> None:
             if ops is not None:
@@ -323,7 +321,7 @@ class ModManApp(App[None]):
                 self.library.save_mod(mod)
                 self.refresh_table()
 
-        self.push_screen(PathOpsScreen(mod, pathops.default_mapping(mod, files)), done)
+        self.push_screen(PathOpsScreen(mod, self.library.default_targets(mod)), done)
 
     def action_remove(self) -> None:
         mod = self.current_mod()

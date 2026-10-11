@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from fnmatch import fnmatchcase
 from typing import TypeVar
 
@@ -19,25 +20,22 @@ class PathOpError(Exception):
     pass
 
 
-DOCUMENT_SUFFIXES = (".txt", ".pdf")
+# Tells whether a file (by its path inside the mod) is ignored, i.e. never deployed.
+Ignored = Callable[[str], bool]
 
 
-def is_documentation(target: str) -> bool:
-    """Readmes and other documents that mods ship next to their game files."""
-    name = target.rsplit("/", 1)[-1].casefold()
-    return name.endswith(DOCUMENT_SUFFIXES) or "readme" in name
-
-
-def default_mapping(mod: Mod, files: list[str]) -> dict[str, str]:
+def default_mapping(mod: Mod, files: list[str], ignored: Ignored | None = None) -> dict[str, str]:
     """Map target path (relative to the game user dir) -> file inside `mods/<id>/files/`.
 
     Files of a dazip go where its `Contents/` folder says; whatever else is in the dazip
-    (Manifest.xml, readmes) is not installed. Files outside any dazip are loose override
-    files.
+    (Manifest.xml, extras) is not installed. Files outside any dazip are loose override
+    files. Ignored files are left out altogether.
     """
     roots = dazip.roots(files)
     mapping: dict[str, str] = {}
     for rel in files:
+        if ignored is not None and ignored(rel):
+            continue
         root = dazip.owner(roots, rel)
         if root is None:
             mapping[f"{OVERRIDE_DIR}/{mod.id}/{rel}"] = rel
@@ -48,16 +46,16 @@ def default_mapping(mod: Mod, files: list[str]) -> dict[str, str]:
     return mapping
 
 
-def kind(files: list[str]) -> str:
+def kind(files: list[str], ignored: Ignored | None = None) -> str:
     """What a mod consists of: dazip(s), loose override files, or both.
 
-    Documents do not count as loose files: a dazip shipped with a readme is still a dazip.
+    Ignored files do not count as loose files: a dazip shipped with a readme is still a dazip.
     """
     roots = dazip.roots(files)
     if not roots:
         return KIND_OVERRIDE
     loose = (rel for rel in files if dazip.owner(roots, rel) is None)
-    return KIND_MIXED if any(not is_documentation(rel) for rel in loose) else KIND_DAZIP
+    return KIND_MIXED if any(not (ignored and ignored(rel)) for rel in loose) else KIND_DAZIP
 
 
 def _is_glob(pattern: str) -> bool:
@@ -118,6 +116,6 @@ def apply_ops(mapping: dict[str, T], ops: list[PathOp]) -> dict[str, T]:
     return dict(sorted(mapping.items()))
 
 
-def resolve(mod: Mod, files: list[str]) -> dict[str, str]:
+def resolve(mod: Mod, files: list[str], ignored: Ignored | None = None) -> dict[str, str]:
     """Final target -> source mapping for a mod."""
-    return apply_ops(default_mapping(mod, files), mod.ops)
+    return apply_ops(default_mapping(mod, files, ignored), mod.ops)

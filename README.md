@@ -63,7 +63,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
     ~/.config/dao-modman/config.toml   # optional overrides, see below
 
 `config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `game_app_id`,
-`data_dir`, `downloads_dir`, `terminal`.
+`data_dir`, `downloads_dir`, `terminal`, `ignore`.
 
 ## Nexus Mods
 
@@ -112,6 +112,29 @@ In the editor (`e`): `r` removes and `m` renames/moves the selected entry, `u` u
 operation. `←`/`→` fold and unfold a folder, `c` folds or unfolds everything, and `/` filters
 the tree to entries whose file or folder name contains the typed text (`esc` clears it).
 
+## Ignored files
+
+The game only loads its own resource types. Readmes, pictures, links and similar files that
+mods ship next to them are **ignored**: they stay in the library but are never deployed, do
+not show in the path editor, cannot conflict, and do not make a dazip mod `mixed`.
+
+Which files are ignored is set with `ignore` in `config.toml`, a list of patterns in
+`.gitignore` syntax. They are matched against paths inside each mod's files, ignoring case:
+
+    ignore = [
+        "*.txt",        # any file with this extension, in any folder
+        "*readme*",     # any file or folder with "readme" in its name
+        "/docs/",       # the docs folder at the top of a mod
+        "!keep.txt",    # ... but not this one
+    ]
+
+Without the key, a built-in list is used: text (`*.txt`, `*.pdf`, `*.rtf`, `*.doc`, `*.docx`,
+`*.odt`, `*.md`, `*.htm`, `*.html`, `*.nfo`, `*.log`), links (`*.url`, `*.lnk`, `*.webloc`),
+pictures (`*.jpg`, `*.jpeg`, `*.png`, `*.gif`, `*.bmp`, `*.webp`), `*readme*`, and packer
+leftovers (`Thumbs.db`, `desktop.ini`, `.DS_Store`, `__MACOSX/`). Setting `ignore` replaces
+that list; `ignore = []` deploys everything. Game formats such as `.dds`, `.tga` and `.xml`
+are not on it.
+
 ## How deployment works
 
 - Target paths are relative to the game user dir: dazip `Contents/` maps 1:1; loose files go
@@ -121,14 +144,13 @@ the tree to entries whose file or folder name contains the typed text (`esc` cle
   as loose override files. An AddIn is registered as long as at least one file of its dazip is
   still deployed, so removing a module's paths also drops its AddIn.
 - The `Kind` column says what a mod consists of: `dazip`, `override` (loose files only) or
-  `mixed` (dazips plus loose game files; a readme alone does not count).
+  `mixed` (dazips plus loose game files; ignored files do not count).
 - Load order: bottom of the list = highest priority; on identical paths it wins.
 - Below an `override` directory the game finds files by name only, in any subfolder. Two mods
   shipping a file with the same name there conflict even at different paths, so only the copy
   of the higher-priority mod is deployed. No need for `zz_` folder prefixes or `toolsetexport`.
   Copies with identical content are not reported as a conflict, since it makes no difference
-  which one is used. Neither are documents: `*.txt`, `*.pdf` and any file with `readme` in
-  its name, ignoring case.
+  which one is used.
 - `chargenmorphcfg.xml` is the exception: when several enabled mods ship one, their entries
   are merged into a single `packages/core/override/chargenmorphcfg.xml` (what the
   CharGenMorph Compiler does) and the individual copies are not deployed.
@@ -229,6 +251,7 @@ automatically (a rename operation in its `mod.toml`).
         dazip.py       # Manifest.xml parsing
         library.py     # import archives into mods/<id>/
         pathops.py     # remove/rename resolution
+        ignore.py      # .gitignore-style rules for files that are never deployed
         nexus.py       # Nexus API client, nxm:// links, downloads
         ipc.py         # socket the nxm:// handler uses to reach the running instance
         terminal.py    # find a terminal emulator to open a new instance in

@@ -8,7 +8,7 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import addins, chargen, pathops
+from . import addins, chargen
 from .archive import sha256_file
 from .dazip import AddIn
 from .library import Library
@@ -196,8 +196,6 @@ def build_plan(library: Library) -> Plan:
         # Only the last mod's files are deployed; duplicates inside one mod are its business.
         winner = items[-1]
         plan.files += [item for item in items if item.mod_id == winner.mod_id]
-        if pathops.is_documentation(winner.target):
-            continue  # the game never loads these, so a clash is of no interest
         if len(_mod_ids(items)) > 1 and not _identical(items):
             plan.conflicts.append(_conflict(items))
 

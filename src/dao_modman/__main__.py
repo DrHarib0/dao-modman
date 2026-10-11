@@ -84,6 +84,10 @@ def cmd_install_nxm_handler() -> int:
     return 0
 
 
+def _library(config: Config) -> Library:
+    return Library(config.dirs, config.ignore)
+
+
 def cmd_laa(action: str, exe: Path | None) -> int:
     install_dir = load_config().game_install_dir
     if not install_dir:
@@ -120,7 +124,7 @@ def cmd_console(action: str) -> int:
             console.enable(config.game_install_dir)
             key = console.ensure_key(config.game_user_dir) if config.game_user_dir else None
             print(f"console enabled, open it with: {console.key_label(key)}")
-            if not console.fonts_installed(config.game_user_dir, Library(config.dirs)):
+            if not console.fonts_installed(config.game_user_dir, _library(config)):
                 print(f"console text is invisible without fonts.erf: {console.FONTS_MOD_URL}")
         elif action == "disable":
             console.disable(config.game_install_dir)
@@ -135,7 +139,7 @@ def cmd_console(action: str) -> int:
 
 
 def cmd_conflicts(action: str | None, names: list[str], accept_all: bool) -> int:
-    library = Library(load_config().dirs)
+    library = _library(load_config())
     plan = deploy.build_plan(library)
     if action is None:
         print(report.format_conflicts(library, plan) or "no conflicts")
