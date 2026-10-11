@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .core import console, deploy, ipc, laa, nexus, paths, report, terminal
+from .core import console, deploy, ipc, laa, nexus, paths, report, revisions, terminal
 from .core.config import TOKEN_VAR, Config, load_config, load_token
 from .core.library import Library
 from .core.nexus import NexusError
@@ -163,6 +163,18 @@ def cmd_conflicts(action: str | None, names: list[str], accept_all: bool) -> int
     return 0
 
 
+def cmd_revisions() -> int:
+    data_dir = load_config().dirs.data
+    if not revisions.init(data_dir):
+        print("error: could not create a git repository (is git installed?)", file=sys.stderr)
+        return 1
+    print(f"tracking the library's metadata in {data_dir}")
+    print("every change is now committed there; look at it with:")
+    print(f"  git -C '{data_dir}' log --stat")
+    print(f"to stop, delete {data_dir / '.git'}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dao-modman", description=__doc__)
     commands = parser.add_subparsers(dest="command")
@@ -185,10 +197,16 @@ def main(argv: list[str] | None = None) -> int:
         "names", nargs="*", help="with accept: file names or mod ids of the conflicts to accept"
     )
     conflicts.add_argument("--all", action="store_true", help="with accept: every open conflict")
+    revisions_cmd = commands.add_parser(
+        "revisions", help="keep a history of the library's metadata in git (debugging aid)"
+    )
+    revisions_cmd.add_argument("action", choices=["init"])
     args = parser.parse_args(argv)
 
     if args.command == "nxm":
         return cmd_nxm(args.url)
+    if args.command == "revisions":
+        return cmd_revisions()
     if args.command == "conflicts":
         return cmd_conflicts(args.action, args.names, args.all)
     if args.command == "console":

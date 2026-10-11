@@ -17,7 +17,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Label, ProgressBar, Static
 
-from ..core import addins, console, deploy, ipc, laa, launch, pathops, report
+from ..core import addins, console, deploy, ipc, laa, launch, pathops, report, revisions
 from ..core.config import Config
 from ..core.dazip import AddIn
 from ..core.install import install_from_nexus, link_to_nexus
@@ -296,19 +296,19 @@ class ModManApp(App[None]):
     def action_toggle(self) -> None:
         if entry := self.current_entry():
             entry.enabled = not entry.enabled
-            self.library.save_profile()
+            self.library.save_profile(f"{'enable' if entry.enabled else 'disable'} {entry.id}")
             self.refresh_table()
 
     def action_toggle_official(self) -> None:
         profile = self.library.profile
         profile.hide_official = not profile.hide_official
-        self.library.save_profile()
+        self.library.save_profile(f"{'hide' if profile.hide_official else 'show'} official DLC")
         self.refresh_table()
 
     def action_move(self, delta: int) -> None:
         entry = self.current_entry()
         if entry and self.library.profile.move(entry.id, delta):
-            self.library.save_profile()
+            self.library.save_profile(f"move {entry.id} {'down' if delta > 0 else 'up'}")
             self.refresh_table(select=entry.id)
 
     def action_rename(self) -> None:
@@ -320,7 +320,7 @@ class ModManApp(App[None]):
         def done(name: str | None) -> None:
             if name and name != mod.name:
                 mod.name = name
-                self.library.save_mod(mod)
+                self.library.save_mod(mod, f"{mod.id}: rename to {name}")
                 self.refresh_table()
 
         self.push_screen(TextPromptScreen("Rename mod", mod.name), done)
@@ -333,7 +333,7 @@ class ModManApp(App[None]):
         def done(group: str | None) -> None:
             if group is not None:
                 entry.group = group
-                self.library.save_profile()
+                self.library.save_profile(f"{entry.id}: set group to {group or '(none)'}")
                 self.refresh_table()
 
         groups = sorted({e.group for e in self.library.profile.mods if e.group}, key=str.casefold)
@@ -357,7 +357,7 @@ class ModManApp(App[None]):
         def done(ops: list[PathOp] | None) -> None:
             if ops is not None:
                 mod.ops = ops
-                self.library.save_mod(mod)
+                self.library.save_mod(mod, f"{mod.id}: edit path operations ({len(ops)})")
                 self.refresh_table()
 
         self.push_screen(PathOpsScreen(mod, self.library.default_targets(mod)), done)
@@ -594,6 +594,7 @@ class ModManApp(App[None]):
             return
         finally:
             self.refresh_status()
+        revisions.snapshot(self.config.dirs.data, f"apply: {result.written} files")
         message = f"Applied {result.written} file(s)"
         if result.skipped:
             message += f", left {len(result.skipped)} existing file(s) untouched"
@@ -670,6 +671,7 @@ class ModManApp(App[None]):
             return
         finally:
             self.refresh_table()
+        revisions.snapshot(self.config.dirs.data, f"unapply{' and clean' if clean else ''}")
         message = f"Removed {result.removed} applied file(s)"
         if clean:
             message += f" and {cleaned} that dao-modman did not manage"

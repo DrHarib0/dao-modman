@@ -134,6 +134,6 @@ def place_fonts(library: Library, mod: Mod) -> bool:
     for target in library.targets(mod):
         if target.casefold().endswith("/fonts.erf") and target.casefold() != FONTS_REL:
             mod.ops.append(PathOp(OP_RENAME, target, FONTS_REL))
-            library.save_mod(mod)
+            library.save_mod(mod, f"{mod.id}: route fonts.erf to {FONTS_REL}")
             return True
     return False

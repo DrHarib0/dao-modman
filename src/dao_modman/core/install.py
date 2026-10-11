@@ -94,6 +94,6 @@ async def link_to_nexus(client: NexusClient, library: Library, mod: Mod) -> bool
         if mod_info.get("mod_id") and file_info.get("file_id"):
             mod.nexus = nexus_info(int(mod_info["mod_id"]), file_info)
             mod.version = mod.version or str(file_info.get("version") or "")
-            library.save_mod(mod)
+            library.save_mod(mod, f"{mod.id}: link to Nexus mod {mod.nexus.mod_id}")
             return True
     return False

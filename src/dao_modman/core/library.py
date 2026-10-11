@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import archive as archives
-from . import dazip, metadata, overridepkg, pathops
+from . import dazip, metadata, overridepkg, pathops, revisions
 from .dazip import AddIn
 from .ignore import DEFAULT_PATTERNS, IgnoreRules
 from .models import (
@@ -91,11 +91,15 @@ class Library:
         entries += [ProfileEntry(id=mod_id) for mod_id in self.mods if mod_id not in seen]
         self.profile.mods = entries
 
-    def save_profile(self) -> None:
+    def save_profile(self, action: str = "change the profile") -> None:
+        """Write profile.toml; `action` describes the change for the revision history."""
         metadata.save_profile(self.dirs.profile_file, self.profile)
+        revisions.snapshot(self.dirs.data, action)
 
-    def save_mod(self, mod: Mod) -> None:
+    def save_mod(self, mod: Mod, action: str | None = None) -> None:
+        """Write the mod's mod.toml; `action` describes the change for the revision history."""
         metadata.save_mod(self.dirs.mods / mod.id, mod)
+        revisions.snapshot(self.dirs.data, action or f"change {mod.id}")
 
     # -- queries ----------------------------------------------------------
 
@@ -153,7 +157,7 @@ class Library:
         value = key.value(label)
         if value is not None and value is not key.value(key.default):
             mod.options[key.id] = value.label
-        self.save_mod(mod)
+        self.save_mod(mod, f"{mod.id}: set option {key.id} = {label}")
 
     def addins(self, mod: Mod, targets: dict[str, str] | None = None) -> list[AddIn]:
         """The mod's AddIns to register: those whose dazip still has files to deploy."""
@@ -253,7 +257,7 @@ class Library:
             shutil.rmtree(stage, ignore_errors=True)
         self.mods[mod.id] = mod
         self.profile.mods.append(ProfileEntry(id=mod.id))
-        self.save_profile()
+        self.save_profile(f"import {mod.id} from {archive.name}")
         return mod
 
     def replace_archive(
@@ -269,7 +273,7 @@ class Library:
             current = self.files_dir(mod.id)
             current.rename(stage / "old")
             files.rename(current)
-            self.save_mod(mod)
+            self.save_mod(mod, f"{mod.id}: replace archive with {archive.name}")
         except (archives.ArchiveError, dazip.DazipError) as exc:
             raise LibraryError(str(exc)) from exc
         finally:
@@ -294,7 +298,8 @@ class Library:
                 mod.overwrites.append(Overwrite(loser, [name]))
             changed = True
         if changed:
-            self.save_mod(mod)
+            what = name or "everything"
+            self.save_mod(mod, f"{winner}: accept overwriting {', '.join(losers)} ({what})")
         return changed
 
     def remove_overwrite(self, winner: str, losers: list[str], name: str | None = None) -> bool:
@@ -314,14 +319,17 @@ class Library:
         mod.overwrites = kept
         changed = before != [(entry.mod, list(entry.files)) for entry in kept]
         if changed:
-            self.save_mod(mod)
+            what = name or "everything"
+            self.save_mod(
+                mod, f"{winner}: no longer accept overwriting {', '.join(losers)} ({what})"
+            )
         return changed
 
     def remove(self, mod_id: str, *, delete_archive: bool = False) -> None:
         mod = self.mods.pop(mod_id)
         shutil.rmtree(self.dirs.mods / mod_id)
         self.profile.mods = [entry for entry in self.profile.mods if entry.id != mod_id]
-        self.save_profile()
+        self.save_profile(f"remove {mod_id}")
         if delete_archive and mod.archive:
             in_use = any(
                 m.archive and m.archive.file == mod.archive.file for m in self.mods.values()
