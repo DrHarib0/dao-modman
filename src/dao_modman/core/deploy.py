@@ -13,6 +13,7 @@ from .archive import sha256_file
 from .dazip import AddIn
 from .library import Library
 from .metadata import write_atomic
+from .models import Mod
 from .paths import normalize_rel, resolve_case
 
 _CHUNK = 1024 * 1024
@@ -33,18 +34,62 @@ class PlannedFile:
     content: bytes | None = None  # generated file: written instead of copying `source`
 
 
+OPEN = "open"  # an ordinary conflict
+ACCEPTED = "accepted"  # the winner declares these overwrites as intended
+ERROR = "error"  # a declared overwrite does not happen, because of the load order
+
+
+@dataclass
+class Provider:
+    """One mod's copies of a contested file."""
+
+    mod_id: str
+    targets: list[str]
+
+
+@dataclass
+class Conflict:
+    """A file that several enabled mods ship with different content."""
+
+    name: str  # the file name below an override dir, else the full target path
+    providers: list[Provider]  # in load order: the last one wins
+    status: str = OPEN
+    # (declaring mod, other mod): declared to overwrite the other, but loads before it
+    misordered: list[tuple[str, str]] = field(default_factory=list)
+
+    @property
+    def mod_ids(self) -> list[str]:
+        return [provider.mod_id for provider in self.providers]
+
+    @property
+    def winner(self) -> Provider:
+        return self.providers[-1]
+
+
 @dataclass
 class Plan:
     files: list[PlannedFile] = field(default_factory=list)
-    # winning target -> mod ids providing it, in load order (the last one wins)
-    conflicts: dict[str, list[str]] = field(default_factory=dict)
+    conflicts: list[Conflict] = field(default_factory=list)
     # generated target -> mod ids whose files were merged into it
     merged: dict[str, list[str]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     addins: list[AddIn] = field(default_factory=list)
 
+    def with_status(self, status: str) -> list[Conflict]:
+        return [conflict for conflict in self.conflicts if conflict.status == status]
+
     def conflicting_mods(self) -> set[str]:
-        return {mod_id for mod_ids in self.conflicts.values() for mod_id in mod_ids}
+        """Mods that take part in an open conflict."""
+        return {mod_id for conflict in self.with_status(OPEN) for mod_id in conflict.mod_ids}
+
+    def misordered_mods(self) -> set[str]:
+        """Mods whose declared overwrite is defeated by the load order."""
+        return {
+            mod_id
+            for conflict in self.with_status(ERROR)
+            for pair in conflict.misordered
+            for mod_id in pair
+        }
 
 
 @dataclass
@@ -78,7 +123,34 @@ def _mod_ids(items: list[PlannedFile]) -> list[str]:
     return list(dict.fromkeys(item.mod_id for item in items))
 
 
+def _conflict(items: list[PlannedFile]) -> Conflict:
+    """Describe a clash; `items` are all copies of one file in load order."""
+    scope = _override_scope(items[-1].target)
+    providers = [
+        Provider(mod_id, [item.target for item in items if item.mod_id == mod_id])
+        for mod_id in _mod_ids(items)
+    ]
+    return Conflict(scope[1] if scope else items[-1].target, providers)
+
+
 _hashes: dict[tuple[Path, int, int], str] = {}
+
+
+def _classify(conflict: Conflict, mods: dict[str, Mod]) -> None:
+    """Set a conflict's status from the overwrites its mods declare."""
+    ids, name = conflict.mod_ids, conflict.name
+    conflict.misordered = [
+        (early, late)
+        for index, early in enumerate(ids)
+        for late in ids[index + 1 :]
+        if mods[early].may_overwrite(late, name)
+    ]
+    if conflict.misordered:
+        conflict.status = ERROR
+    elif all(mods[ids[-1]].may_overwrite(loser, name) for loser in ids[:-1]):
+        conflict.status = ACCEPTED
+    else:
+        conflict.status = OPEN
 
 
 def _identical(items: list[PlannedFile]) -> bool:
@@ -126,8 +198,8 @@ def build_plan(library: Library) -> Plan:
         plan.files += [item for item in items if item.mod_id == winner.mod_id]
         if pathops.is_documentation(winner.target):
             continue  # the game never loads these, so a clash is of no interest
-        if len(mod_ids := _mod_ids(items)) > 1 and not _identical(items):
-            plan.conflicts[winner.target] = mod_ids
+        if len(_mod_ids(items)) > 1 and not _identical(items):
+            plan.conflicts.append(_conflict(items))
 
     for items in chargens.values():
         mod_ids = _mod_ids(items)
@@ -142,7 +214,7 @@ def build_plan(library: Library) -> Plan:
         ]
         if content is None:
             plan.files.append(items[-1])
-            plan.conflicts[items[-1].target] = mod_ids
+            plan.conflicts.append(_conflict(items))
             continue
         scope_dir = _override_scope(items[0].target)[0]
         target = f"{scope_dir}/{chargen.FILE_NAME}"
@@ -150,7 +222,9 @@ def build_plan(library: Library) -> Plan:
         plan.merged[target] = mod_ids
 
     plan.files.sort(key=lambda planned: planned.target.casefold())
-    plan.conflicts = dict(sorted(plan.conflicts.items()))
+    plan.conflicts.sort(key=lambda conflict: conflict.name.casefold())
+    for conflict in plan.conflicts:
+        _classify(conflict, library.mods)
     return plan
 
 

@@ -22,6 +22,8 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
     uv run dao-modman install-nxm-handler  # register as nxm:// handler
     uv run dao-modman laa status|patch|restore   # Large Address Aware patch, see below
     uv run dao-modman console status|enable|disable   # developer console, see below
+    uv run dao-modman conflicts            # which mods ship the same files, and who wins
+    uv run dao-modman conflicts accept NAME ... | --all   # mark conflicts as intended
 
     uv run pytest
     uv run ruff check . && uv run ruff format .
@@ -42,6 +44,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 | `o`              | open the mod's Nexus page in the browser |
 | `c`              | check Nexus for updates                  |
 | `u`              | update the selected mod in place         |
+| `v`              | conflict report                          |
 | `a` / `x`        | apply / unapply                          |
 | `l`              | launch the game through Steam            |
 | `h`              | hide / show the game's official DLC      |
@@ -133,6 +136,44 @@ the tree to entries whose file or folder name contains the typed text (`esc` cle
   unchanged; files that existed before or were edited are left alone.
 - dazip AddIns are added to / removed from `Settings/AddIns.xml`.
 
+### Conflict report
+
+`v` in the TUI, or `dao-modman conflicts`, lists every contested file grouped by the mods that
+ship it. Mods are shown in load order with the winner last; under each file is every copy
+with its folder, and the one the game gets is marked:
+
+    #4 Dain's Fixes  <  #5 Extras   (1 file)
+      abi_bloodcontrol.gda
+        #4 Dain's Fixes   packages/core/override/Dains Fixes/2. Tweaks/Blood Control/
+        #5 Extras         packages/core/override/Dains Fixes/6. Extras/Blood Control damage on resist/   ← used
+
+### Accepted overwrites
+
+Some conflicts are intended: one mod is meant to replace files of another. The winning mod
+can declare that in its `mod.toml`:
+
+    [[overwrites]]
+    mod = "dain-s-fixes"              # id of the mod whose files may be overwritten
+    files = ["abi_coneofcold.gda"]    # names or globs, ignoring case; leave out for every file
+
+A conflict is **accepted** when the winner covers every other mod that ships the file; it
+then no longer shows as `conflict`. If the load order changes so that the declaring mod loads
+*before* the other one, the overwrite does not happen: the mods are marked `wrong order` in
+red, the report says so, and `dao-modman conflicts` exits with status 1.
+
+To set it:
+
+- In the conflict report (`v`), `a` on a file line accepts that file; on a mods line it
+  accepts everything between those mods, including clashes that appear later. `a` again
+  takes it back.
+- `dao-modman conflicts accept NAME ...` takes file names (globs allowed) or mod ids; a mod id
+  accepts every open conflict that mod takes part in. `dao-modman conflicts accept --all`
+  accepts every open conflict. Entries are written file by file.
+
+A rule is kept when the mod it names is removed, since removal is often temporary. It then
+does nothing, and is listed in the report as an unused rule so that it does not come back
+unnoticed when the mod is installed again; `a` on it in the dialog drops it.
+
 ## Official DLC and other AddIns
 
 The game's `Settings/addins.xml` already lists its own DLC, and dazip mods are registered in
@@ -194,6 +235,7 @@ automatically (a rename operation in its `mod.toml`).
         addins.py      # Settings/AddIns.xml
         chargen.py     # chargenmorphcfg.xml merging
         deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply
+        report.py      # conflict report
         laa.py         # LAA patch for the game executable
         launch.py      # start the game through Steam
         console.py     # developer console switch, key binding, fonts.erf

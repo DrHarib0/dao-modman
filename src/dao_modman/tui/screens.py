@@ -11,7 +11,8 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Label, OptionList, Static, Tree
 from textual.widgets.option_list import Option
 
-from ..core import nexus, pathops
+from ..core import deploy, nexus, pathops, report
+from ..core.library import Library
 from ..core.models import OP_REMOVE, OP_RENAME, Mod, PathOp
 from ..core.nexus import NexusClient, NexusError, NxmLink
 
@@ -240,6 +241,98 @@ class PathTree(Tree[str]):
         node = self.cursor_node
         if node is not None and node.allow_expand and not node.is_expanded:
             node.expand()
+
+
+class ConflictsScreen(ModalScreen[None]):
+    """Conflict report: mods involved -> file -> every copy with its folder."""
+
+    BINDINGS = [
+        Binding("a", "accept", "Accept / un-accept"),
+        Binding("escape,q,v", "close", "Close"),
+    ]
+
+    def __init__(self, library: Library) -> None:
+        super().__init__()
+        self.library = library
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog wide tall"):
+            yield Label("Conflicts (the last mod wins)", classes="title")
+            yield PathTree("Conflicts", id="conflicts")
+            yield Label(
+                "[b]a[/] accept as intended / take back / drop unused rule   "
+                "[b]\u2190 \u2192[/] fold   [b]esc[/] close",
+                classes="hint",
+            )
+
+    def on_mount(self) -> None:
+        tree = self.query_one("#conflicts", PathTree)
+        tree.show_root = False
+        self.rebuild()
+        tree.focus()
+
+    def rebuild(self, select: str | None = None) -> None:
+        plan = deploy.build_plan(self.library)
+        tree = self.query_one("#conflicts", PathTree)
+        tree.clear()
+        nodes = {}
+        for group in report.conflict_groups(self.library, plan):
+            group_node = tree.root.add(
+                escape(report.group_line(group)), data=("group", group), expand=True
+            )
+            nodes[group.title] = group_node
+            for conflict in group.conflicts:
+                line = report.file_line(self.library, conflict)
+                file_node = group_node.add(escape(line), data=("file", conflict), expand=True)
+                nodes[f"{group.title}/{conflict.name}"] = file_node
+                for copy in report.provider_lines(self.library, conflict):
+                    file_node.add_leaf(escape(copy))
+        if merged := report.merged_lines(self.library, plan):
+            merged_node = tree.root.add("Merged (no mod loses)", expand=True)
+            for line in merged:
+                merged_node.add_leaf(escape(line))
+        if unused := report.unused_rules(self.library):
+            unused_node = tree.root.add(report.UNUSED_TITLE, expand=True)
+            nodes[report.UNUSED_TITLE] = unused_node
+            for mod_id, rule in unused:
+                line = report.unused_line(self.library, mod_id, rule)
+                unused_node.add_leaf(escape(line), data=("unused", (mod_id, rule.mod)))
+        if select in nodes:
+            tree._tree_lines  # noqa: B018 - lays the new nodes out, so the cursor can go there
+            tree.move_cursor(nodes[select])
+
+    def action_accept(self) -> None:
+        """Toggle acceptance: of a file, or (on a mods line) of everything between those mods."""
+        node = self.query_one("#conflicts", PathTree).cursor_node
+        if node is None or node.data is None:
+            return
+        kind, item = node.data
+        if kind == "unused":  # a rule about a mod that is gone: `a` drops it
+            self.library.remove_overwrite(item[0], [item[1]])
+            self.rebuild(select=report.UNUSED_TITLE)
+            return
+        conflicts = item.conflicts if kind == "group" else [item]
+        *losers, winner = conflicts[0].mod_ids
+        if any(conflict.status == deploy.ERROR for conflict in conflicts):
+            self.notify("Wrong order: move the mods, then accept", severity="warning")
+            return
+        if kind == "group":
+            key = item.title
+            if all(conflict.status == deploy.ACCEPTED for conflict in conflicts):
+                self.library.remove_overwrite(winner, losers)
+            else:
+                self.library.accept_overwrite(winner, losers)
+        else:
+            key = f"{node.parent.data[1].title}/{item.name}"
+            if item.status == deploy.OPEN:
+                self.library.accept_overwrite(winner, losers, item.name)
+            elif not self.library.remove_overwrite(winner, losers, item.name):
+                self.notify("Accepted for the whole mod: take it back on the mods line")
+                return
+        self.rebuild(select=key)
+
+    def action_close(self) -> None:
+        self.dismiss(None)
 
 
 class PathOpsScreen(ModalScreen[list[PathOp] | None]):

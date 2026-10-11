@@ -68,6 +68,10 @@ ModalScreen {
     margin-top: 1;
 }
 
+#conflicts {
+    height: 1fr;
+}
+
 #targets {
     height: 1fr;
 }

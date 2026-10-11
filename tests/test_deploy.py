@@ -15,6 +15,11 @@ from .conftest import make_dazip, make_zip
 OVERRIDE = "packages/core/override"
 
 
+def by_target(plan: deploy.Plan) -> dict[str, list[str]]:
+    """Conflicts as `deployed copy -> mods shipping the file, in load order`."""
+    return {conflict.winner.targets[-1]: conflict.mod_ids for conflict in plan.conflicts}
+
+
 def tree(root: Path) -> list[str]:
     return sorted(p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file())
 
@@ -35,7 +40,7 @@ def test_plan_priority_and_conflicts(tmp_path: Path, library: Library) -> None:
         f"{OVERRIDE}/shared/l.erf": "low",
         f"{OVERRIDE}/shared/X.ERF": "high",
     }
-    assert plan.conflicts == {f"{OVERRIDE}/shared/X.ERF": ["low", "high"]}
+    assert by_target(plan) == {f"{OVERRIDE}/shared/X.ERF": ["low", "high"]}
     assert plan.conflicting_mods() == {"low", "high"}
 
     library.profile.move("high", -1)
@@ -45,7 +50,7 @@ def test_plan_priority_and_conflicts(tmp_path: Path, library: Library) -> None:
     library.profile.entry("low").enabled = False
     plan = deploy.build_plan(library)
     assert [f.mod_id for f in plan.files] == ["high"]
-    assert plan.conflicts == {}
+    assert by_target(plan) == {}
 
 
 def test_apply_and_unapply(tmp_path: Path, library: Library, user_dir: Path) -> None:
@@ -161,7 +166,7 @@ def test_override_conflicts_are_by_file_name(
         f"{OVERRIDE}/high/b/robe.dds": "high",
         f"{OVERRIDE}/low/only_low.dds": "low",
     }
-    assert plan.conflicts == {f"{OVERRIDE}/high/b/robe.dds": ["low", "high"]}
+    assert by_target(plan) == {f"{OVERRIDE}/high/b/robe.dds": ["low", "high"]}
 
     library.profile.move("low", 1)  # low is now last, so it wins
     plan = deploy.build_plan(library)
@@ -179,7 +184,7 @@ def test_same_name_outside_override_is_not_a_conflict(tmp_path: Path, library: L
         mod.ops = [PathOp("rename", f"{OVERRIDE}/{name}", f"docs/{name}")]
     plan = deploy.build_plan(library)
     assert [f.target for f in plan.files] == ["docs/one/readme.txt", "docs/two/readme.txt"]
-    assert plan.conflicts == {}
+    assert by_target(plan) == {}
 
 
 def chargen_xml(hairs: list[str], colors: list[str]) -> str:
@@ -214,7 +219,7 @@ def test_chargenmorphcfg_is_merged(tmp_path: Path, library: Library, user_dir: P
     plan = deploy.build_plan(library)
     merged = f"{OVERRIDE}/chargenmorphcfg.xml"
     assert plan.merged == {merged: ["hair", "colors", "broken"]}
-    assert plan.conflicts == {}
+    assert by_target(plan) == {}
     assert len(plan.warnings) == 1 and plan.warnings[0].startswith("broken:")
     assert [f.target for f in plan.files] == [merged, f"{OVERRIDE}/hair/hair_a.mmh"]
 
@@ -245,7 +250,7 @@ def test_identical_files_are_not_a_conflict(tmp_path: Path, library: Library) ->
     library.import_archive(make_zip(tmp_path / "third.zip", {"u.gda": "44"}))  # same size as u
 
     plan = deploy.build_plan(library)
-    assert plan.conflicts == {
+    assert by_target(plan) == {
         f"{OVERRIDE}/extras/x/t.gda": ["base", "extras"],
         f"{OVERRIDE}/third/u.gda": ["extras", "third"],
     }
@@ -262,7 +267,7 @@ def test_documentation_files_are_not_a_conflict(tmp_path: Path, library: Library
         files = {doc: f"{name} {doc}" for doc in docs}
         library.import_archive(make_zip(tmp_path / f"{name}.zip", {**files, "tex.dds": name}))
     plan = deploy.build_plan(library)
-    assert plan.conflicts == {f"{OVERRIDE}/two/tex.dds": ["one", "two"]}
+    assert by_target(plan) == {f"{OVERRIDE}/two/tex.dds": ["one", "two"]}
 
 
 def test_addin_is_registered_only_while_its_dazip_has_files(
@@ -294,3 +299,70 @@ def test_addin_is_registered_only_while_its_dazip_has_files(
     # with only part of it removed it stays registered
     mod.ops = [PathOp("remove", "addins/optional")]
     assert [a.uid for a in deploy.build_plan(library).addins] == ["main", "optional"]
+
+
+def statuses(plan: deploy.Plan) -> dict[str, str]:
+    return {conflict.name: conflict.status for conflict in plan.conflicts}
+
+
+def test_accepted_overwrites_and_wrong_order(tmp_path: Path, library: Library) -> None:
+    from dao_modman.core.models import Overwrite
+
+    for name in ("base", "middle", "top"):
+        library.import_archive(
+            make_zip(tmp_path / f"{name}.zip", {"a.gda": name, "b.gda": name, "Tex.DDS": name})
+        )
+    top = library.mods["top"]
+
+    plan = deploy.build_plan(library)
+    assert statuses(plan) == {"a.gda": "open", "b.gda": "open", "Tex.DDS": "open"}
+    assert plan.conflicting_mods() == {"base", "middle", "top"}
+
+    # one file, one of the two losers: not enough, "middle" is overwritten too
+    top.overwrites = [Overwrite("base", ["a.gda"])]
+    assert statuses(deploy.build_plan(library))["a.gda"] == "open"
+
+    # every loser covered: by name, by glob (case-insensitive) and for a whole mod
+    top.overwrites = [Overwrite("base", ["A.GDA", "*.dds"]), Overwrite("middle")]
+    plan = deploy.build_plan(library)
+    assert statuses(plan) == {"a.gda": "accepted", "b.gda": "open", "Tex.DDS": "accepted"}
+    assert plan.misordered_mods() == set()
+
+    # the load order changes: "top" no longer wins against "middle"
+    library.profile.move("top", -1)
+    plan = deploy.build_plan(library)
+    assert statuses(plan) == {"a.gda": "error", "b.gda": "error", "Tex.DDS": "error"}
+    assert {tuple(c.misordered) for c in plan.conflicts} == {(("top", "middle"),)}
+    assert plan.misordered_mods() == {"top", "middle"}
+    assert plan.conflicting_mods() == set()
+
+    # nothing to complain about once the other mod is off
+    library.profile.entry("middle").enabled = False
+    plan = deploy.build_plan(library)
+    assert statuses(plan) == {"a.gda": "accepted", "b.gda": "open", "Tex.DDS": "accepted"}
+
+
+def test_accept_and_remove_overwrite(tmp_path: Path, library: Library) -> None:
+    for name in ("base", "top"):
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", {"a.gda": name, "b.gda": name}))
+
+    def stored() -> list[tuple[str, list[str]]]:
+        return [(o.mod, o.files) for o in Library(library.dirs).mods["top"].overwrites]
+
+    assert library.accept_overwrite("top", ["base"], "a.gda")
+    assert not library.accept_overwrite("top", ["base"], "A.GDA")  # already covered
+    assert library.accept_overwrite("top", ["base"], "b.gda")
+    assert stored() == [("base", ["a.gda", "b.gda"])]
+    assert statuses(deploy.build_plan(library)) == {"a.gda": "accepted", "b.gda": "accepted"}
+
+    assert library.remove_overwrite("top", ["base"], "a.gda")
+    assert stored() == [("base", ["b.gda"])]
+    assert library.remove_overwrite("top", ["base"], "b.gda")
+    assert stored() == []  # the entry is dropped, never turned into "every file"
+
+    assert library.accept_overwrite("top", ["base"])  # the whole mod
+    assert not library.accept_overwrite("top", ["base"], "a.gda")
+    assert stored() == [("base", [])]
+    assert not library.remove_overwrite("top", ["base"], "a.gda")  # cannot carve out one file
+    assert library.remove_overwrite("top", ["base"])
+    assert stored() == []

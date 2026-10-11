@@ -14,6 +14,7 @@ from .models import (
     ArchiveInfo,
     Mod,
     NexusInfo,
+    Overwrite,
     Profile,
     ProfileEntry,
 )
@@ -205,6 +206,47 @@ class Library:
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         return mod
+
+    def accept_overwrite(self, winner: str, losers: list[str], name: str | None = None) -> bool:
+        """Declare that `winner` overwriting `losers` is intended: one file, or everything."""
+        mod, changed = self.mods[winner], False
+        for loser in losers:
+            entries = [entry for entry in mod.overwrites if entry.mod == loser]
+            if name is None:
+                if [entry.files for entry in entries] == [[]]:
+                    continue
+                mod.overwrites = [entry for entry in mod.overwrites if entry.mod != loser]
+                mod.overwrites.append(Overwrite(loser))
+            elif mod.may_overwrite(loser, name):
+                continue
+            elif entries:
+                entries[0].files.append(name)
+            else:
+                mod.overwrites.append(Overwrite(loser, [name]))
+            changed = True
+        if changed:
+            self.save_mod(mod)
+        return changed
+
+    def remove_overwrite(self, winner: str, losers: list[str], name: str | None = None) -> bool:
+        """Take a declaration back: for one file name, or everything about `losers`."""
+        mod = self.mods[winner]
+        before = [(entry.mod, list(entry.files)) for entry in mod.overwrites]
+        kept = []
+        for entry in mod.overwrites:
+            if entry.mod in losers:
+                if name is None:
+                    continue
+                if entry.files:  # a whole-mod entry cannot give up a single file
+                    entry.files = [f for f in entry.files if f.casefold() != name.casefold()]
+                    if not entry.files:
+                        continue
+            kept.append(entry)
+        mod.overwrites = kept
+        changed = before != [(entry.mod, list(entry.files)) for entry in kept]
+        if changed:
+            self.save_mod(mod)
+        return changed
 
     def remove(self, mod_id: str, *, delete_archive: bool = False) -> None:
         mod = self.mods.pop(mod_id)

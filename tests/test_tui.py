@@ -647,3 +647,126 @@ async def test_open_nexus_page(tmp_path: Path, dirs: Dirs, user_dir: Path) -> No
         await pilot.press("down", "o")  # a local mod has no page
         assert len(opened) == 1
         assert "did not come from Nexus" in [n.message for n in app._notifications][-1]
+
+
+async def test_conflicts_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    from dao_modman.tui.screens import ConflictsScreen
+
+    library = Library(dirs)
+    library.import_archive(make_zip(tmp_path / "Alpha.zip", {"tex/robe.dds": "a", "a.erf": "a"}))
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("v")
+        assert not isinstance(app.screen, ConflictsScreen)
+        assert [n.message for n in app._notifications][-1] == "No conflicts"
+
+        app.library.import_archive(make_zip(tmp_path / "Beta.zip", {"robe.dds": "b"}))
+        app.refresh_table()
+        assert rows(app)[0][8] == "conflict" and rows(app)[1][8] == "conflict"
+        await pilot.press("v")
+        assert isinstance(app.screen, ConflictsScreen)
+        tree = app.screen.query_one(Tree)
+
+        def labels(node) -> list:
+            return [(str(child.label), labels(child)) for child in node.children]
+
+        assert labels(tree.root) == [
+            (
+                "#1 Alpha  <  #2 Beta   (1 file)",
+                [
+                    (
+                        "robe.dds",
+                        [
+                            (f"#1 Alpha   {OVERRIDE}/alpha/tex/", []),
+                            (f"#2 Beta    {OVERRIDE}/beta/   \u2190 used", []),
+                        ],
+                    )
+                ],
+            )
+        ]
+        await pilot.press("escape")
+        assert not isinstance(app.screen, ConflictsScreen)
+
+
+async def test_accepting_overwrites_in_the_conflicts_dialog(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    library = Library(dirs)
+    library.import_archive(make_zip(tmp_path / "Alpha.zip", {"a.gda": "a", "b.gda": "a"}))
+    library.import_archive(make_zip(tmp_path / "Beta.zip", {"a.gda": "b", "b.gda": "b"}))
+
+    def notes(app: ModManApp) -> list[str]:
+        return [row[8] for row in rows(app)]
+
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        assert notes(app) == ["conflict", "conflict"]
+        await pilot.press("v")
+        tree = app.screen.query_one(Tree)
+
+        def lines() -> list[str]:
+            group = tree.root.children[0]
+            return [str(group.label), *(str(child.label) for child in group.children)]
+
+        assert lines() == ["#1 Alpha  <  #2 Beta   (2 files)", "a.gda", "b.gda"]
+
+        # accept one file, then take it back
+        await pilot.press("down", "a")
+        assert lines()[1:] == ["b.gda", "a.gda   \u2713 accepted"]
+        assert tree.cursor_node.data[1].name == "a.gda"  # the cursor follows the file
+        await pilot.press("a")
+        assert lines()[1:] == ["a.gda", "b.gda"]
+
+        # accept everything between the two mods on the mods line
+        await pilot.press("up", "a")
+        assert lines() == [
+            "#1 Alpha  <  #2 Beta   (2 files, accepted)",
+            "a.gda   \u2713 accepted",
+            "b.gda   \u2713 accepted",
+        ]
+        assert [(o.mod, o.files) for o in app.library.mods["beta"].overwrites] == [("alpha", [])]
+        # a single file cannot be carved out of a whole-mod entry
+        await pilot.press("down", "a")
+        assert lines()[1] == "a.gda   \u2713 accepted"
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert notes(app) == ["", ""]
+
+        # reversing the load order turns the accepted overwrite into an error
+        await pilot.press("J")
+        assert notes(app) == ["wrong order", "wrong order"]
+        await pilot.press("v", "a")  # cannot be accepted away
+        tree = app.screen.query_one(Tree)
+        assert lines()[0].startswith("#1 Beta  <  #2 Alpha")
+        assert "wrong order: #1 Beta is set to overwrite #2 Alpha" in lines()[1]
+        await pilot.press("escape", "a")
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        assert "wrong load order" in app.screen.message
+
+    assert [(o.mod, o.files) for o in Library(dirs).mods["beta"].overwrites] == [("alpha", [])]
+
+
+async def test_unused_overwrite_rules_can_be_dropped(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    from dao_modman.core.models import Overwrite
+    from dao_modman.tui.screens import ConflictsScreen
+
+    library = Library(dirs)
+    mod = library.import_archive(make_zip(tmp_path / "Alpha.zip", {"a.gda": "a"}))
+    mod.overwrites = [Overwrite("removed-mod", ["a.gda"])]
+    library.save_mod(mod)
+
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("v")  # opens although nothing conflicts
+        assert isinstance(app.screen, ConflictsScreen)
+        section = app.screen.query_one(Tree).root.children[0]
+        assert [str(leaf.label) for leaf in section.children] == [
+            "#1 Alpha may overwrite removed-mod: a.gda"
+        ]
+        await pilot.press("down", "a")
+        assert list(app.screen.query_one(Tree).root.children) == []
+    assert Library(dirs).mods["alpha"].overwrites == []

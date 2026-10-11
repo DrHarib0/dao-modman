@@ -14,7 +14,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Label, ProgressBar, Static
 
-from ..core import addins, console, deploy, ipc, laa, launch, pathops
+from ..core import addins, console, deploy, ipc, laa, launch, pathops, report
 from ..core import archive as archives
 from ..core.config import Config
 from ..core.dazip import AddIn
@@ -25,6 +25,7 @@ from ..core.models import Mod, PathOp, ProfileEntry
 from ..core.nexus import GAME, NexusClient, NexusError, NxmLink, newest_file_id, parse_nxm
 from .screens import (
     ConfirmScreen,
+    ConflictsScreen,
     GroupScreen,
     NexusAddScreen,
     PathOpsScreen,
@@ -70,6 +71,7 @@ class ModManApp(App[None]):
         Binding("o", "open_page", "Nexus page"),
         Binding("c", "check_updates", "Check"),
         Binding("u", "update", "Update"),
+        Binding("v", "conflicts", "Conflicts"),
         Binding("a", "apply", "Apply"),
         Binding("x", "unapply", "Unapply"),
         Binding("l", "launch", "Launch"),
@@ -179,9 +181,10 @@ class ModManApp(App[None]):
         table = self.query_one("#mods", DataTable)
         selected = select or (entry.id if (entry := self.current_entry()) else None)
         try:
-            conflicting = deploy.build_plan(self.library).conflicting_mods()
+            plan = deploy.build_plan(self.library)
+            conflicting, misordered = plan.conflicting_mods(), plan.misordered_mods()
         except (pathops.PathOpError, OSError) as exc:
-            conflicting = set()
+            conflicting, misordered = set(), set()
             self.notify(str(exc), severity="error", markup=False)
         table.clear()
         shipped = addins.shipped_uids(self.config.game_install_dir)
@@ -195,6 +198,7 @@ class ModManApp(App[None]):
             notes = [
                 note
                 for note, active in (
+                    ("wrong order", mod.id in misordered),
                     ("conflict", entry.enabled and mod.id in conflicting),
                     ("update", mod.id in self.updates),
                 )
@@ -210,7 +214,10 @@ class ModManApp(App[None]):
                 str(len(mod.ops)) if mod.ops else "",
                 ", ".join(notes),
             )
-            table.add_row(*self._cells(entry.enabled, cells), key=mod.id)
+            row = self._cells(entry.enabled, cells)
+            if mod.id in misordered:
+                row[-1].stylize("bold red")
+            table.add_row(*row, key=mod.id)
         ids = [entry.id for entry in self.library.profile.mods]
         if selected in ids:
             table.move_cursor(row=self._addin_row_count + ids.index(selected))
@@ -456,6 +463,18 @@ class ModManApp(App[None]):
 
     # -- deployment -------------------------------------------------------
 
+    def action_conflicts(self) -> None:
+        """Show which mods ship the same files, and whose copy wins."""
+        try:
+            plan = deploy.build_plan(self.library)
+        except (pathops.PathOpError, MetadataError, OSError) as exc:
+            self.error(exc)
+            return
+        if plan.conflicts or plan.merged or report.unused_rules(self.library):
+            self.push_screen(ConflictsScreen(self.library), lambda _: self.refresh_table())
+        else:
+            self.notify("No conflicts")
+
     def action_apply(self) -> None:
         user_dir = self.config.game_user_dir
         if not user_dir:
@@ -473,14 +492,17 @@ class ModManApp(App[None]):
         ]
         if plan.addins:
             lines.append(f"\nAddIns: {', '.join(addin.name for addin in plan.addins)}")
-        if plan.conflicts:
-            lines.append(f"\n{len(plan.conflicts)} conflicting file(s), last mod wins:")
-            lines += [
-                f"  {target}: {' < '.join(mods)}"
-                for target, mods in list(plan.conflicts.items())[:8]
-            ]
-            if len(plan.conflicts) > 8:
-                lines.append("  ...")
+        errors, open_ = plan.with_status(deploy.ERROR), plan.with_status(deploy.OPEN)
+        if errors:
+            lines.append(f"\n{len(errors)} overwrite(s) in the wrong load order:")
+            lines += [f"  {report.file_line(self.library, conflict)}" for conflict in errors[:8]]
+        if open_:
+            lines.append(f"\n{len(open_)} conflicting file(s), last mod wins:")
+            lines += [f"  {c.name}: {' < '.join(c.mod_ids)}" for c in open_[:8]]
+        if len(errors) > 8 or len(open_) > 8:
+            lines.append("  ... (v shows the full report)")
+        if accepted := len(plan.with_status(deploy.ACCEPTED)):
+            lines.append(f"\n{accepted} accepted overwrite(s)")
 
         def done(confirmed: bool | None) -> None:
             if confirmed:

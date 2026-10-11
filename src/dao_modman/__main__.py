@@ -9,7 +9,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-from .core import console, ipc, laa, nexus, paths, terminal
+from .core import console, deploy, ipc, laa, nexus, paths, report, terminal
 from .core.config import TOKEN_VAR, Config, load_config, load_token
 from .core.library import Library
 from .core.nexus import NexusError
@@ -134,6 +134,31 @@ def cmd_console(action: str) -> int:
     return 0
 
 
+def cmd_conflicts(action: str | None, names: list[str], accept_all: bool) -> int:
+    library = Library(load_config().dirs)
+    plan = deploy.build_plan(library)
+    if action is None:
+        print(report.format_conflicts(library, plan) or "no conflicts")
+        return 1 if plan.with_status(deploy.ERROR) else 0
+
+    if bool(names) == accept_all:
+        print("error: give file names or mod ids to accept, or --all (not both)", file=sys.stderr)
+        return 2
+    selected, unmatched = report.select_conflicts(plan, names)
+    if unmatched:
+        print(f"error: no open conflict matches {', '.join(unmatched)}", file=sys.stderr)
+        return 1
+    for conflict in selected:
+        *losers, winner = conflict.mod_ids
+        library.accept_overwrite(winner, losers, conflict.name)
+        print(f"accepted {conflict.name}: {winner} overwrites {', '.join(losers)}")
+    if not selected:
+        print("no open conflicts")
+    for conflict in plan.with_status(deploy.ERROR):
+        print(f"not accepted: {report.file_line(library, conflict)}")
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dao-modman", description=__doc__)
     commands = parser.add_subparsers(dest="command")
@@ -148,10 +173,20 @@ def main(argv: list[str] | None = None) -> int:
     )
     console_cmd = commands.add_parser("console", help="enable the game's developer console")
     console_cmd.add_argument("action", choices=["status", "enable", "disable"])
+    conflicts = commands.add_parser(
+        "conflicts", help="report files that several mods ship, or accept them as intended"
+    )
+    conflicts.add_argument("action", nargs="?", choices=["accept"])
+    conflicts.add_argument(
+        "names", nargs="*", help="with accept: file names or mod ids of the conflicts to accept"
+    )
+    conflicts.add_argument("--all", action="store_true", help="with accept: every open conflict")
     args = parser.parse_args(argv)
 
     if args.command == "nxm":
         return cmd_nxm(args.url)
+    if args.command == "conflicts":
+        return cmd_conflicts(args.action, args.names, args.all)
     if args.command == "console":
         return cmd_console(args.action)
     if args.command == "laa":
