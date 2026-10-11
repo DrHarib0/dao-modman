@@ -11,6 +11,7 @@ from textual.screen import ModalScreen
 from textual.widgets import Input, Label, OptionList, Static, Tree
 from textual.widgets.option_list import Option
 
+from ..core import archive as archives
 from ..core import deploy, nexus, pathops, report
 from ..core.library import Library
 from ..core.models import OP_REMOVE, OP_RENAME, Mod, PathOp
@@ -162,6 +163,7 @@ class OptionsScreen(ModalScreen[None]):
         self.library = library
         self.mod = mod
         self.keys: list[OptionKey] = []
+        self.files: set[str] = set()  # names of all files in the mod
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog wide"):
@@ -178,10 +180,14 @@ class OptionsScreen(ModalScreen[None]):
         if chosen is None:
             return f"{key.section} / {key.name}: (no usable default)"
         changed = "" if key.is_default(self.mod.options) else "  (changed)"
-        return f"{key.section} / {key.name}: {chosen.label}{changed}  \u2190 {chosen.file}"
+        # a default that the package ships only as the original file has no variant file
+        source = chosen.file if chosen.file.casefold() in self.files else key.original
+        return f"{key.section} / {key.name}: {chosen.label}{changed}  \u2190 {source}"
 
     def rebuild(self, highlight: int = 0) -> None:
         self.keys = [key for package in self.library.options(self.mod) for key in package.keys]
+        listing = archives.list_files(self.library.files_dir(self.mod.id))
+        self.files = {rel.rpartition("/")[2].casefold() for rel in listing}
         options = self.query_one("#option-keys", OptionList)
         options.clear_options()
         options.add_options([Option(escape(self.describe(key))) for key in self.keys])

@@ -179,9 +179,11 @@ def apply_options(
                 del result[variant]
         if chosen is None:
             continue  # nothing selectable: the original, if any, stays as it is
-        if chosen_source is None:
-            warnings.append(f"option {key.id}: variant file {chosen.file!r} is missing")
-            continue
         originals = in_package(key.original)
+        if chosen_source is None:
+            # Packages often ship the default only as the original file, not as a variant.
+            if not (originals and chosen is key.value(key.default)):
+                warnings.append(f"option {key.id}: variant file {chosen.file!r} is missing")
+            continue
         result[originals[0] if originals else f"{folder}/{key.original}"] = chosen_source
     return result, warnings

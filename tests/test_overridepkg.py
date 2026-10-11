@@ -157,12 +157,13 @@ def test_path_operations_apply_after_options(tmp_path: Path, library: Library) -
 def test_missing_variant_keeps_the_original_and_warns(tmp_path: Path, library: Library) -> None:
     mod = library.import_archive(make_override(tmp_path / "Bodies.override"))
     variants = library.files_dir(mod.id) / "BioWare/Dragon Age" / BASE / "Variants"
-    (variants / "(medium)hf_body.msh").unlink()
-    (variants / "(long)ef_ears.msh").unlink()
+    library.set_option(mod, library.options(mod)[0].keys[0], "Big")
+    (variants / "(big)hf_body.msh").unlink()  # the variant the user chose
+    (variants / "(long)ef_ears.msh").unlink()  # a default with no original file to fall back on
 
     plan = deploy.build_plan(library)
     assert plan.warnings == [
-        "bodies: option Humans/Body: variant file '(medium)hf_body.msh' is missing",
+        "bodies: option Humans/Body: variant file '(big)hf_body.msh' is missing",
         "bodies: option Elves/Ears: variant file '(long)ef_ears.msh' is missing",
     ]
     assert contents(library, mod) == {
@@ -170,6 +171,19 @@ def test_missing_variant_keeps_the_original_and_warns(tmp_path: Path, library: L
         "hf_skin.dds": "pale skin",
         "other.mao": "plain file",
     }
+
+
+def test_default_shipped_only_as_the_original_is_fine(tmp_path: Path, library: Library) -> None:
+    """Real packages often list a default variant file that is just the original file."""
+    mod = library.import_archive(make_override(tmp_path / "Bodies.override"))
+    variants = library.files_dir(mod.id) / "BioWare/Dragon Age" / BASE / "Variants"
+    (variants / "(pale)HF_skin.dds").unlink()  # "Pale" is the default of Humans/Skin
+
+    assert deploy.build_plan(library).warnings == []
+    assert contents(library, mod)["hf_skin.dds"] == "original skin"
+    skin = library.options(mod)[0].keys[1]
+    library.set_option(mod, skin, "Tan")
+    assert contents(library, mod)["hf_skin.dds"] == "tan skin"
 
 
 def test_broken_config_is_reported_not_fatal(tmp_path: Path, library: Library) -> None:
