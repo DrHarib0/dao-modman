@@ -4,7 +4,10 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import time
+from collections.abc import Callable
 from pathlib import Path
+from typing import TypeVar
 
 import httpx2
 from rich.text import Text
@@ -30,10 +33,13 @@ from .screens import (
     NexusAddScreen,
     OptionsScreen,
     PathOpsScreen,
+    ProgressScreen,
     TextPromptScreen,
 )
 
 ENABLED = "✓"
+T = TypeVar("T")
+
 COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", "Ops", "Notes")
 
 
@@ -98,6 +104,7 @@ class ModManApp(App[None]):
         self.account: dict | None = None
         self.updates: set[str] = set()
         self._addin_row_count = 0
+        self._busy = False  # a long operation is running behind a progress dialog
         self._addins_error_shown = False
         self._links = links or []  # nxm:// links to download right after start
         self._lock: ipc.InstanceLock | None = None
@@ -548,11 +555,38 @@ class ModManApp(App[None]):
 
         self.push_screen(ConfirmScreen("\n".join(lines)), done)
 
+    def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:
+        """No key does anything while a long operation runs: not even quit."""
+        return not self._busy
+
+    async def run_with_progress(self, title: str, operation: Callable[..., T], *args: object) -> T:
+        """Run a blocking operation in a thread behind a progress dialog.
+
+        `operation` is called with `args` plus a progress callback as its last argument.
+        """
+        screen = ProgressScreen(title)
+        self._busy = True
+        await self.push_screen(screen)
+        last = 0.0
+
+        def progress(phase: str, done: int, total: int) -> None:
+            nonlocal last
+            now = time.monotonic()
+            if done >= total or now - last >= 0.05:  # do not flood the UI with updates
+                last = now
+                self.call_from_thread(screen.advance, phase, done, total)
+
+        try:
+            return await asyncio.to_thread(operation, *args, progress)
+        finally:
+            self._busy = False
+            await screen.dismiss()
+
     @work
     async def run_apply(self, plan: deploy.Plan, user_dir: Path) -> None:
         try:
-            result = await asyncio.to_thread(
-                deploy.apply, plan, user_dir, self.config.dirs.deployed_file
+            result = await self.run_with_progress(
+                "Applying mods", deploy.apply, plan, user_dir, self.config.dirs.deployed_file
             )
         except (deploy.DeployError, OSError, ValueError) as exc:
             self.error(exc)
@@ -578,7 +612,9 @@ class ModManApp(App[None]):
     @work
     async def run_unapply(self) -> None:
         try:
-            result = await asyncio.to_thread(deploy.unapply, self.config.dirs.deployed_file)
+            result = await self.run_with_progress(
+                "Removing applied mods", deploy.unapply, self.config.dirs.deployed_file
+            )
         except (deploy.DeployError, OSError, ValueError) as exc:
             self.error(exc)
             return

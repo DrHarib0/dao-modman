@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, OptionList, Static, Tree
+from textual.widgets import Input, Label, OptionList, ProgressBar, Static, Tree
 from textual.widgets.option_list import Option
 
 from ..core import archive as archives
@@ -38,6 +38,24 @@ class ConfirmScreen(ModalScreen[bool]):
 
     def action_answer(self, value: bool) -> None:
         self.dismiss(value)
+
+
+class ProgressScreen(ModalScreen[None]):
+    """Shown while a long operation runs. It has no keys: the operation cannot be left."""
+
+    def __init__(self, title: str) -> None:
+        super().__init__()
+        self.title_text = title
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog"):
+            yield Label(self.title_text, classes="title", markup=False)
+            yield ProgressBar(id="work-progress")
+            yield Static("", id="work-detail", markup=False)
+
+    def advance(self, phase: str, done: int, total: int) -> None:
+        self.query_one("#work-progress", ProgressBar).update(total=total, progress=done)
+        self.query_one("#work-detail", Static).update(f"{phase}: {done} / {total}")
 
 
 class TextPromptScreen(ModalScreen[str | None]):

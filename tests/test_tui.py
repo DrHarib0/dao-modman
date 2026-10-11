@@ -868,3 +868,45 @@ async def test_package_options_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path
         assert not (user_dir / base / "Variants").exists()
 
     assert Library(dirs).mods["bodies"].options == {"Humans/Body": "Big"}
+
+
+async def test_apply_runs_behind_a_progress_dialog(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch
+) -> None:
+    import threading
+
+    from dao_modman.core import deploy
+    from dao_modman.tui.screens import ProgressScreen
+
+    Library(dirs).import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1", "b.erf": "2"}))
+    release, real_apply = threading.Event(), deploy.apply
+
+    def slow_apply(plan, user_dir, deployed_file, progress):
+        progress("Copying files", 1, 2)
+        release.wait(5)  # hold the operation so the test can look at the dialog
+        return real_apply(plan, user_dir, deployed_file, progress)
+
+    monkeypatch.setattr(deploy, "apply", slow_apply)
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("a", "y")
+        for _ in range(50):
+            await pilot.pause(0.02)
+            if isinstance(app.screen, ProgressScreen):
+                break
+        assert isinstance(app.screen, ProgressScreen)
+        await pilot.pause(0.1)
+        assert str(app.screen.query_one("#work-detail", Static).render()) == "Copying files: 1 / 2"
+
+        # nothing gets through while it runs: not quit, not another apply, not a toggle
+        await pilot.press("q", "space", "a", "escape")
+        assert app.is_running and isinstance(app.screen, ProgressScreen)
+        assert rows(app)[0][1] == "\u2713"
+
+        release.set()
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not isinstance(app.screen, ProgressScreen)
+        assert (user_dir / OVERRIDE / "one/a.erf").is_file()
+        await pilot.press("space")  # keys work again
+        assert rows(app)[0][1] == ""
