@@ -3,7 +3,7 @@
 Terminal (Textual) mod manager for **Dragon Age: Origins** on Steam/Proton (Linux).
 
 Downloads mods from Nexus Mods or imports local archives (`.dazip`, `.override`, `.zip`,
-`.7z`, `.rar`) into a library, lets you enable/disable, group and prioritize them, adjust
+`.7z`, `.rar`; dazips, override packages and loose files) into a library, lets you enable/disable, group and prioritize them, adjust
 which paths get installed, and applies them to the game's user dir inside the Proton prefix:
 
     steamapps/compatdata/<17450|47810>/pfx/drive_c/users/steamuser/Documents/BioWare/Dragon Age/
@@ -38,6 +38,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 | `K` / `J`        | move mod up / down in the load order     |
 | `r`              | rename mod (display name only)           |
 | `g`              | set group                                |
+| `p`              | options of an override package           |
 | `n`              | add mod from Nexus (URL, id or `nxm://`) |
 | `i`              | import a local archive                   |
 | `e`              | edit path operations                     |
@@ -143,8 +144,9 @@ are not on it.
   unpacked on import and installed as described by its `Contents/` folder; the rest is treated
   as loose override files. An AddIn is registered as long as at least one file of its dazip is
   still deployed, so removing a module's paths also drops its AddIn.
-- The `Kind` column says what a mod consists of: `dazip`, `override` (loose files only) or
-  `mixed` (dazips plus loose game files; ignored files do not count).
+- The `Kind` column says what a mod consists of: `dazip`, `package` (override package, see
+  below), `override` (loose files only) or `mixed` (more than one of these; ignored files do
+  not count).
 - Load order: bottom of the list = highest priority; on identical paths it wins.
 - Below an `override` directory the game finds files by name only, in any subfolder. Two mods
   shipping a file with the same name there conflict even at different paths, so only the copy
@@ -157,6 +159,30 @@ are not on it.
 - Every deployed file is recorded with its SHA-256. Unapply deletes only files that are still
   unchanged; files that existed before or were edited are left alone.
 - dazip AddIns are added to / removed from `Settings/AddIns.xml`.
+
+### Override packages
+
+DAO-Modmanager introduced a third, unofficial format: the override package, a zip with the
+extension `.override`. It holds a `Manifest.xml` (name, version, author) and its files below
+`BioWare/Dragon Age/`, i.e. with their full path under the Documents folder. Packages are
+unpacked on import, also when wrapped in another archive, and installed at the paths they
+name; the manifest is never deployed.
+
+A package may offer **options** in an `OverrideConfig.xml`: for one game file, several
+variant files of which one is used. `p` lists them, each with its chosen value and the
+variant file behind it; `enter` picks another value. Choices are stored in `mod.toml`:
+
+    [options]
+    "Human Females/Hand Size" = "NB big"
+
+The chosen variant is deployed under the original file's name, and the other variants are
+not deployed at all, so the game dir holds only what is in use. Options are resolved before
+path operations: an operation on the original's path applies to whichever variant is chosen,
+and changing a choice never touches your operations. In the path editor, a file that comes
+from a variant shows it (`hf_glv_nud_0.msh  ← (NB100 hand)hf_glv_nud_0.msh`). Mods with
+options show `options` in `Notes`, with the number of choices that differ from the defaults.
+
+Not supported: creating packages, and DAO-Modmanager's separate `DA_ini_config.xml` system.
 
 ### Conflict report
 
@@ -249,6 +275,7 @@ automatically (a rename operation in its `mod.toml`).
         metadata.py    # mod.toml / profile.toml
         archive.py     # safe extraction, hashing
         dazip.py       # Manifest.xml parsing
+        overridepkg.py # override packages (.override) and their options
         library.py     # import archives into mods/<id>/
         pathops.py     # remove/rename resolution
         ignore.py      # .gitignore-style rules for files that are never deployed
