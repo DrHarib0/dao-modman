@@ -8,12 +8,11 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from . import addins, chargen, dazip
+from . import addins, chargen, pathops
 from .archive import sha256_file
 from .dazip import AddIn
 from .library import Library
 from .metadata import write_atomic
-from .models import KIND_DAZIP
 from .paths import normalize_rel, resolve_case
 
 _CHUNK = 1024 * 1024
@@ -79,15 +78,6 @@ def _mod_ids(items: list[PlannedFile]) -> list[str]:
     return list(dict.fromkeys(item.mod_id for item in items))
 
 
-DOCUMENT_SUFFIXES = (".txt", ".pdf")
-
-
-def _is_documentation(target: str) -> bool:
-    """Readmes and other documents that mods ship next to their game files."""
-    name = target.rsplit("/", 1)[-1].casefold()
-    return name.endswith(DOCUMENT_SUFFIXES) or "readme" in name
-
-
 _hashes: dict[tuple[Path, int, int], str] = {}
 
 
@@ -116,7 +106,8 @@ def build_plan(library: Library) -> Plan:
         if not entry.enabled:
             continue
         files_dir = library.files_dir(mod.id)
-        for target, source in library.targets(mod).items():
+        targets = library.targets(mod)
+        for target, source in targets.items():
             planned = PlannedFile(normalize_rel(target), files_dir / source, mod.id)
             scope = _override_scope(planned.target)
             if scope is None:
@@ -127,14 +118,13 @@ def build_plan(library: Library) -> Plan:
             else:
                 key = (scope[0].casefold(), scope[1].casefold())
             candidates.setdefault(key, []).append(planned)
-        if mod.kind == KIND_DAZIP and (manifest := dazip.find_manifest(files_dir)):
-            plan.addins += dazip.parse_manifest(manifest)
+        plan.addins += library.addins(mod, targets)
 
     for items in candidates.values():
         # Only the last mod's files are deployed; duplicates inside one mod are its business.
         winner = items[-1]
         plan.files += [item for item in items if item.mod_id == winner.mod_id]
-        if _is_documentation(winner.target):
+        if pathops.is_documentation(winner.target):
             continue  # the game never loads these, so a clash is of no interest
         if len(mod_ids := _mod_ids(items)) > 1 and not _identical(items):
             plan.conflicts[winner.target] = mod_ids

@@ -113,7 +113,12 @@ the tree to entries whose file or folder name contains the typed text (`esc` cle
 
 - Target paths are relative to the game user dir: dazip `Contents/` maps 1:1; loose files go
   to `packages/core/override/<mod-id>/`. Path operations are then applied on top.
-- An archive that wraps a single `.dazip` is unwrapped on import.
+- An archive may contain any number of `.dazip` files next to loose files. Each dazip is
+  unpacked on import and installed as described by its `Contents/` folder; the rest is treated
+  as loose override files. An AddIn is registered as long as at least one file of its dazip is
+  still deployed, so removing a module's paths also drops its AddIn.
+- The `Kind` column says what a mod consists of: `dazip`, `override` (loose files only) or
+  `mixed` (dazips plus loose game files; a readme alone does not count).
 - Load order: bottom of the list = highest priority; on identical paths it wins.
 - Below an `override` directory the game finds files by name only, in any subfolder. Two mods
   shipping a file with the same name there conflict even at different paths, so only the copy

@@ -43,21 +43,28 @@ def addin_from_element(item: ET.Element) -> AddIn | None:
     )
 
 
-def find_manifest(files_dir: Path) -> Path | None:
-    """The top-level Manifest.xml of an extracted dazip (any casing)."""
-    if not files_dir.is_dir():
-        return None
-    for entry in files_dir.iterdir():
-        if entry.name.casefold() == MANIFEST and entry.is_file():
-            return entry
-    return None
+def roots(files: list[str]) -> dict[str, str]:
+    """Dazips found in a list of relative paths: folder -> path of its Manifest.xml.
+
+    A folder is a dazip root if it holds a `Manifest.xml` and a `Contents/` folder (any
+    casing). The top level is the folder `""`: a plain extracted dazip.
+    """
+    manifests: dict[str, str] = {}
+    with_contents: set[str] = set()
+    for rel in files:
+        parts = rel.split("/")
+        if parts[-1].casefold() == MANIFEST:
+            manifests["/".join(parts[:-1])] = rel
+        for depth, part in enumerate(parts[:-1]):
+            if part.casefold() == CONTENTS:
+                with_contents.add("/".join(parts[:depth]))
+    return {folder: manifests[folder] for folder in sorted(manifests) if folder in with_contents}
 
 
-def is_dazip(files_dir: Path) -> bool:
-    has_contents = files_dir.is_dir() and any(
-        entry.name.casefold() == CONTENTS and entry.is_dir() for entry in files_dir.iterdir()
-    )
-    return has_contents and find_manifest(files_dir) is not None
+def owner(roots: dict[str, str], rel: str) -> str | None:
+    """The dazip root that the file `rel` belongs to (the innermost one), if any."""
+    inside = [folder for folder in roots if not folder or rel.startswith(folder + "/")]
+    return max(inside, key=len, default=None)
 
 
 def parse_manifest(manifest: Path) -> list[AddIn]:

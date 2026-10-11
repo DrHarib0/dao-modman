@@ -12,7 +12,7 @@ import pytest
 from dao_modman.core import archive as archives
 from dao_modman.core import metadata
 from dao_modman.core.library import Library, LibraryError, slugify
-from dao_modman.core.models import KIND_DAZIP, KIND_OVERRIDE
+from dao_modman.core.models import KIND_DAZIP, KIND_MIXED, KIND_OVERRIDE
 
 from .conftest import make_dazip, make_zip
 
@@ -102,15 +102,53 @@ def test_import_dazip(tmp_path: Path, library: Library) -> None:
     }
 
 
-def test_import_unwraps_single_nested_dazip(tmp_path: Path, library: Library) -> None:
-    inner = make_dazip(tmp_path / "inner.dazip")
+def test_import_unpacks_nested_dazip_and_keeps_loose_files(
+    tmp_path: Path, library: Library
+) -> None:
+    inner = make_dazip(tmp_path / "inner.dazip", uid="inner", title="Inner AddIn")
     outer = make_zip(
-        tmp_path / "outer.zip", {"readme.txt": "r", "mod/inner.dazip": inner.read_bytes()}
+        tmp_path / "outer.zip", {"tex.dds": "t", "mod/Inner.dazip": inner.read_bytes()}
     )
-    mod = library.import_archive(outer, name="Wrapped")
-    assert mod.kind == KIND_DAZIP
-    assert mod.name == "Wrapped"
+    mod = library.import_archive(outer)
+    assert mod.kind == KIND_MIXED  # a dazip plus a loose game file
+    assert (mod.name, mod.version) == ("Inner AddIn", "1.2")  # the one AddIn describes the mod
     assert mod.archive.file == "outer.zip"
+    assert (library.files_dir(mod.id) / "mod/Inner.dazip").is_dir()
+    assert library.targets(mod) == {
+        "addins/inner/module/data/a.gda": "mod/Inner.dazip/Contents/addins/inner/module/data/a.gda",
+        "packages/core/override/inner/b.erf": (
+            "mod/Inner.dazip/Contents/packages/core/override/inner/b.erf"
+        ),
+        "packages/core/override/inner-addin/tex.dds": "tex.dds",
+    }
+
+
+def test_import_archive_with_several_dazips(tmp_path: Path, library: Library) -> None:
+    one = make_dazip(tmp_path / "one.dazip", uid="dog_talents", title="Dog Talents")
+    two = make_dazip(tmp_path / "two.dazip", uid="dog_class", title="Dog Class")
+    archive = make_zip(
+        tmp_path / "Dog Pack.zip",
+        {"One.dazip": one.read_bytes(), "Two.DAZIP": two.read_bytes(), "readme.txt": "r"},
+    )
+    mod = library.import_archive(archive)
+    # the readme is the only loose file, and documents do not make a mod "mixed"
+    assert (mod.id, mod.name, mod.kind) == ("dog-pack", "Dog Pack", KIND_DAZIP)
+    assert mod.addin_uids == ["dog_talents", "dog_class"]
+    assert [addin.uid for addin in library.addins(mod)] == ["dog_talents", "dog_class"]
+    assert sorted(library.targets(mod)) == [
+        "addins/dog_class/module/data/a.gda",
+        "addins/dog_talents/module/data/a.gda",
+        "packages/core/override/dog-pack/readme.txt",
+        "packages/core/override/dog_class/b.erf",
+        "packages/core/override/dog_talents/b.erf",
+    ]
+
+
+def test_import_fails_on_a_broken_nested_dazip(tmp_path: Path, library: Library) -> None:
+    archive = make_zip(tmp_path / "bad.zip", {"Broken.dazip": "not a zip", "a.erf": "a"})
+    with pytest.raises(LibraryError):
+        library.import_archive(archive)
+    assert list(library.dirs.mods.iterdir()) == []
 
 
 def test_import_ids_are_unique(tmp_path: Path, library: Library) -> None:

@@ -263,3 +263,34 @@ def test_documentation_files_are_not_a_conflict(tmp_path: Path, library: Library
         library.import_archive(make_zip(tmp_path / f"{name}.zip", {**files, "tex.dds": name}))
     plan = deploy.build_plan(library)
     assert plan.conflicts == {f"{OVERRIDE}/two/tex.dds": ["one", "two"]}
+
+
+def test_addin_is_registered_only_while_its_dazip_has_files(
+    tmp_path: Path, library: Library, user_dir: Path
+) -> None:
+    one = make_dazip(tmp_path / "one.dazip", uid="main")
+    two = make_dazip(tmp_path / "two.dazip", uid="optional")
+    mod = library.import_archive(
+        make_zip(
+            tmp_path / "pack.zip", {"One.dazip": one.read_bytes(), "Two.dazip": two.read_bytes()}
+        )
+    )
+    deployed = library.dirs.deployed_file
+
+    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert result.addins == ["main", "optional"]
+    assert (user_dir / "addins/optional/module/data/a.gda").is_file()
+
+    # dropping every file of the optional module also drops its AddIn
+    mod.ops = [
+        PathOp("remove", "addins/optional"),
+        PathOp("remove", f"{OVERRIDE}/optional"),
+    ]
+    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert result.addins == ["main"]
+    assert addin_uids(user_dir) == ["main"]
+    assert not (user_dir / "addins/optional").exists()
+
+    # with only part of it removed it stays registered
+    mod.ops = [PathOp("remove", "addins/optional")]
+    assert [a.uid for a in deploy.build_plan(library).addins] == ["main", "optional"]

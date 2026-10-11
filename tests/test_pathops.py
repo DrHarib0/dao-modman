@@ -3,7 +3,14 @@ from __future__ import annotations
 import pytest
 
 from dao_modman.core.models import Mod, PathOp
-from dao_modman.core.pathops import PathOpError, apply_ops, default_mapping, matches, resolve
+from dao_modman.core.pathops import (
+    PathOpError,
+    apply_ops,
+    default_mapping,
+    kind,
+    matches,
+    resolve,
+)
 
 MAPPING = {
     "override/mod/a.erf": "a.erf",
@@ -17,6 +24,36 @@ def test_default_mapping_dazip_skips_non_contents() -> None:
     mod = Mod(id="m", name="M", kind="dazip")
     files = ["Manifest.xml", "contents/addins/m/x.gda", "readme.txt"]
     assert default_mapping(mod, files) == {"addins/m/x.gda": "contents/addins/m/x.gda"}
+
+
+def test_default_mapping_with_several_dazips_and_loose_files() -> None:
+    mod = Mod(id="m", name="M")
+    files = [
+        "readme.txt",
+        "extra/tex.dds",
+        "One.dazip/Manifest.xml",
+        "One.dazip/Contents/addins/one/a.erf",
+        "One.dazip/docs.txt",
+        "sub/Two.dazip/manifest.xml",
+        "sub/Two.dazip/contents/packages/core/data/two.erf",
+        "NotADazip/Manifest.xml",  # no Contents folder next to it
+    ]
+    assert default_mapping(mod, files) == {
+        "addins/one/a.erf": "One.dazip/Contents/addins/one/a.erf",
+        "packages/core/data/two.erf": "sub/Two.dazip/contents/packages/core/data/two.erf",
+        "packages/core/override/m/readme.txt": "readme.txt",
+        "packages/core/override/m/extra/tex.dds": "extra/tex.dds",
+        "packages/core/override/m/NotADazip/Manifest.xml": "NotADazip/Manifest.xml",
+    }
+
+
+def test_kind() -> None:
+    dazip = ["X.dazip/Manifest.xml", "X.dazip/Contents/addins/x/a.erf"]
+    assert kind(["a.erf", "docs/readme.txt"]) == "override"
+    assert kind(["Manifest.xml", "Contents/a.erf", "readme.txt"]) == "dazip"
+    assert kind([*dazip, "ReadMe.TXT", "manual.pdf", "docs/README"]) == "dazip"
+    assert kind([*dazip, "readme.txt", "textures/t.dds"]) == "mixed"
+    assert kind([*dazip, "X.dazip/extra.erf"]) == "dazip"  # inside the dazip, not loose
 
 
 def test_matches() -> None:

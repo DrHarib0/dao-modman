@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 
 KIND_DAZIP = "dazip"
 KIND_OVERRIDE = "override"
+KIND_MIXED = "mixed"  # dazip(s) plus loose override files
 
 OP_REMOVE = "remove"
 OP_RENAME = "rename"

@@ -5,7 +5,8 @@ from __future__ import annotations
 from fnmatch import fnmatchcase
 from typing import TypeVar
 
-from .models import KIND_DAZIP, OP_REMOVE, OP_RENAME, Mod, PathOp
+from . import dazip
+from .models import KIND_DAZIP, KIND_MIXED, KIND_OVERRIDE, OP_REMOVE, OP_RENAME, Mod, PathOp
 from .paths import normalize_rel
 
 T = TypeVar("T")
@@ -18,18 +19,45 @@ class PathOpError(Exception):
     pass
 
 
+DOCUMENT_SUFFIXES = (".txt", ".pdf")
+
+
+def is_documentation(target: str) -> bool:
+    """Readmes and other documents that mods ship next to their game files."""
+    name = target.rsplit("/", 1)[-1].casefold()
+    return name.endswith(DOCUMENT_SUFFIXES) or "readme" in name
+
+
 def default_mapping(mod: Mod, files: list[str]) -> dict[str, str]:
-    """Map target path (relative to the game user dir) -> file inside `mods/<id>/files/`."""
+    """Map target path (relative to the game user dir) -> file inside `mods/<id>/files/`.
+
+    Files of a dazip go where its `Contents/` folder says; whatever else is in the dazip
+    (Manifest.xml, readmes) is not installed. Files outside any dazip are loose override
+    files.
+    """
+    roots = dazip.roots(files)
     mapping: dict[str, str] = {}
     for rel in files:
-        if mod.kind == KIND_DAZIP:
-            head, _, rest = rel.partition("/")
-            if head.casefold() != "contents" or not rest:
-                continue  # Manifest.xml, readmes, ...
-            mapping[rest] = rel
-        else:
+        root = dazip.owner(roots, rel)
+        if root is None:
             mapping[f"{OVERRIDE_DIR}/{mod.id}/{rel}"] = rel
+            continue
+        head, _, rest = rel[len(root) + 1 if root else 0 :].partition("/")
+        if head.casefold() == dazip.CONTENTS and rest:
+            mapping[rest] = rel
     return mapping
+
+
+def kind(files: list[str]) -> str:
+    """What a mod consists of: dazip(s), loose override files, or both.
+
+    Documents do not count as loose files: a dazip shipped with a readme is still a dazip.
+    """
+    roots = dazip.roots(files)
+    if not roots:
+        return KIND_OVERRIDE
+    loose = (rel for rel in files if dazip.owner(roots, rel) is None)
+    return KIND_MIXED if any(not is_documentation(rel) for rel in loose) else KIND_DAZIP
 
 
 def _is_glob(pattern: str) -> bool:

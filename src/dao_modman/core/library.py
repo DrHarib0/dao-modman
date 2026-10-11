@@ -9,9 +9,8 @@ from pathlib import Path
 
 from . import archive as archives
 from . import dazip, metadata, pathops
+from .dazip import AddIn
 from .models import (
-    KIND_DAZIP,
-    KIND_OVERRIDE,
     ArchiveInfo,
     Mod,
     NexusInfo,
@@ -92,6 +91,19 @@ class Library:
         """Target path -> source file (relative to the mod's files dir), with ops applied."""
         return pathops.resolve(mod, archives.list_files(self.files_dir(mod.id)))
 
+    def addins(self, mod: Mod, targets: dict[str, str] | None = None) -> list[AddIn]:
+        """The mod's AddIns to register: those whose dazip still has files to deploy."""
+        files_dir = self.files_dir(mod.id)
+        roots = dazip.roots(archives.list_files(files_dir))
+        sources = (self.targets(mod) if targets is None else targets).values()
+        used = {dazip.owner(roots, source) for source in sources}
+        return [
+            addin
+            for folder, manifest in roots.items()
+            if folder in used
+            for addin in dazip.parse_manifest(files_dir / manifest)
+        ]
+
     # -- mutation ---------------------------------------------------------
 
     def _unique_id(self, name: str) -> str:
@@ -103,16 +115,15 @@ class Library:
         return candidate
 
     def _stage(self, archive: Path, stage: Path) -> Path:
-        """Extract into `stage/files`; unwrap an archive that only wraps one .dazip."""
+        """Extract into `stage/files`, unpacking every dazip inside into a folder of its name."""
         files = stage / FILES_DIR
         archives.extract(archive, files)
-        if not dazip.is_dazip(files):
-            nested = [f for f in archives.list_files(files) if f.lower().endswith(".dazip")]
-            if len(nested) == 1:
-                inner = stage / "inner"
-                archives.extract(files / nested[0], inner)
-                shutil.rmtree(files)
-                inner.rename(files)
+        for nested in archives.list_files(files):
+            if nested.lower().endswith(".dazip"):
+                unpacked = stage / "dazip"
+                archives.extract(files / nested, unpacked)
+                (files / nested).unlink()
+                unpacked.rename(files / nested)
         return files
 
     def _store(self, archive: Path) -> Path:
@@ -137,14 +148,15 @@ class Library:
             raise LibraryError(f"{archive.name} contains no files")
         sha256, md5 = archives.file_hashes(archive)
         mod.archive = ArchiveInfo(file=archive.name, sha256=sha256, md5=md5)
-        mod.kind = KIND_DAZIP if dazip.is_dazip(files) else KIND_OVERRIDE
-        mod.name, mod.version, mod.addin_uids = name or mod.name, version, []
-        if mod.kind == KIND_DAZIP:
-            addins = dazip.parse_manifest(dazip.find_manifest(files))
-            mod.addin_uids = [addin.uid for addin in addins]
-            if addins:
-                mod.name = name or addins[0].name
-                mod.version = version or addins[0].version
+        listing = archives.list_files(files)
+        roots = dazip.roots(listing)
+        addins = [a for manifest in roots.values() for a in dazip.parse_manifest(files / manifest)]
+        mod.kind = pathops.kind(listing)
+        mod.name, mod.version = name or mod.name, version
+        mod.addin_uids = [addin.uid for addin in addins]
+        if len(addins) == 1:  # a mod that is one AddIn is best described by it
+            mod.name = name or addins[0].name
+            mod.version = version or addins[0].version
 
     def import_archive(
         self,
