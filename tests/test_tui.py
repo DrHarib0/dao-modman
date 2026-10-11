@@ -789,3 +789,82 @@ async def test_notes_show_overwrite_rules(tmp_path: Path, dirs: Dirs, user_dir: 
         app.library.mods["gamma"].overwrites.pop(0)
         app.refresh_table()
         assert rows(app)[2][8] == "overwrites removed-mod (missing)"
+
+
+async def test_package_options_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    from dao_modman.tui.screens import ChoiceScreen, OptionsScreen
+
+    from .conftest import make_override
+
+    library = Library(dirs)
+    library.import_archive(make_zip(tmp_path / "plain.zip", {"a.erf": "a"}))
+    library.import_archive(make_override(tmp_path / "Bodies.override"))
+    base = "packages/core/override/Bodies"
+
+    def lines(app: ModManApp) -> list[str]:
+        box = app.screen.query_one("#option-keys", OptionList)
+        return [str(box.get_option_at_index(i).prompt) for i in range(box.option_count)]
+
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        assert [row[5] for row in rows(app)] == ["override", "package"]
+        assert [row[8] for row in rows(app)] == ["", "options"]
+
+        await pilot.press("p")  # a mod without options
+        assert not isinstance(app.screen, OptionsScreen)
+        assert [n.message for n in app._notifications][-1] == "plain has no options"
+
+        await pilot.press("down", "p")
+        assert isinstance(app.screen, OptionsScreen)
+        assert lines(app) == [
+            "Humans / Body: Medium  \u2190 (medium)hf_body.msh",
+            "Humans / Skin: Pale  \u2190 (pale)HF_skin.dds",
+            "Elves / Ears: Long  \u2190 (long)ef_ears.msh",
+        ]
+
+        # change the first option: the current value is preselected, the default is marked
+        await pilot.press("enter")
+        assert isinstance(app.screen, ChoiceScreen)
+        choice = app.screen.query_one(OptionList)
+        assert [str(choice.get_option_at_index(i).prompt) for i in range(2)] == [
+            "Big",
+            "Medium (default)",
+        ]
+        assert choice.highlighted == 1
+        await pilot.press("up", "enter")
+        await pilot.pause()
+        assert lines(app)[0] == "Humans / Body: Big  (changed)  \u2190 (big)hf_body.msh"
+
+        # escape in the value list changes nothing
+        await pilot.press("down", "enter", "escape")
+        await pilot.pause()
+        assert lines(app)[1] == "Humans / Skin: Pale  \u2190 (pale)HF_skin.dds"
+
+        await pilot.press("escape")
+        await pilot.pause()
+        assert rows(app)[1][8] == "options (1 changed)"
+
+        # the path editor shows the deployed name together with the variant behind it
+        await pilot.press("e")
+        tree = app.screen.query_one(Tree)
+
+        def leaves(node) -> list[str]:
+            found: list[str] = []
+            for child in node.children:
+                found += leaves(child) if child.children else [str(child.label)]
+            return found
+
+        assert sorted(leaves(tree.root)) == [
+            "ef_ears.msh  \u2190 (long)ef_ears.msh",
+            "hf_body.msh  \u2190 (big)hf_body.msh",
+            "hf_skin.dds  \u2190 (pale)HF_skin.dds",
+            "other.mao",
+        ]
+        await pilot.press("escape")
+
+        await pilot.press("a", "y")
+        await app.workers.wait_for_complete()
+        assert (user_dir / base / "hf_body.msh").read_text() == "big body"
+        assert not (user_dir / base / "Variants").exists()
+
+    assert Library(dirs).mods["bodies"].options == {"Humans/Body": "Big"}

@@ -15,6 +15,7 @@ from ..core import deploy, nexus, pathops, report
 from ..core.library import Library
 from ..core.models import OP_REMOVE, OP_RENAME, Mod, PathOp
 from ..core.nexus import NexusClient, NexusError, NxmLink
+from ..core.overridepkg import OptionKey
 
 HIDDEN_CATEGORIES = {"ARCHIVED", "REMOVED"}
 
@@ -119,26 +120,97 @@ class GroupScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class ToolsScreen(ModalScreen[str | None]):
-    """A menu of one-off tools. Result: the id of the chosen tool."""
+class ChoiceScreen(ModalScreen[str | None]):
+    """Pick one entry from a short list. Result: the id of the chosen entry."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, tools: list[tuple[str, str]]) -> None:
+    def __init__(
+        self, title: str, choices: list[tuple[str, str]], *, selected: str | None = None
+    ) -> None:
         super().__init__()
-        self.tools = tools
+        self.title_text = title
+        self.choices = choices
+        self.selected = selected
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
-            yield Label("Tools", classes="title")
-            yield OptionList(*(Option(escape(label), id=tool) for tool, label in self.tools))
-            yield Label("[b]enter[/] run   [b]esc[/] cancel", classes="hint")
+            yield Label(self.title_text, classes="title", markup=False)
+            yield OptionList(*(Option(escape(label), id=key) for key, label in self.choices))
+            yield Label("[b]enter[/] choose   [b]esc[/] cancel", classes="hint")
+
+    def on_mount(self) -> None:
+        ids = [key for key, _label in self.choices]
+        if self.selected in ids:
+            self.query_one(OptionList).highlighted = ids.index(self.selected)
 
     @on(OptionList.OptionSelected)
     def select(self, event: OptionList.OptionSelected) -> None:
         self.dismiss(event.option.id)
 
     def action_cancel(self) -> None:
+        self.dismiss(None)
+
+
+class OptionsScreen(ModalScreen[None]):
+    """Choose the variants of an override package's options."""
+
+    BINDINGS = [Binding("escape,q,p", "close", "Close")]
+
+    def __init__(self, library: Library, mod: Mod) -> None:
+        super().__init__()
+        self.library = library
+        self.mod = mod
+        self.keys: list[OptionKey] = []
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog wide"):
+            yield Label(f"Options of {self.mod.name}", classes="title", markup=False)
+            yield OptionList(id="option-keys")
+            yield Label("[b]enter[/] change   [b]esc[/] close", classes="hint")
+
+    def on_mount(self) -> None:
+        self.rebuild()
+
+    def describe(self, key: OptionKey) -> str:
+        """`Section / Key: value  ← variant file`, with a mark if it is not the default."""
+        chosen = key.chosen(self.mod.options)
+        if chosen is None:
+            return f"{key.section} / {key.name}: (no usable default)"
+        changed = "" if key.is_default(self.mod.options) else "  (changed)"
+        return f"{key.section} / {key.name}: {chosen.label}{changed}  \u2190 {chosen.file}"
+
+    def rebuild(self, highlight: int = 0) -> None:
+        self.keys = [key for package in self.library.options(self.mod) for key in package.keys]
+        options = self.query_one("#option-keys", OptionList)
+        options.clear_options()
+        options.add_options([Option(escape(self.describe(key))) for key in self.keys])
+        if self.keys:
+            options.highlighted = min(highlight, len(self.keys) - 1)
+
+    @on(OptionList.OptionSelected, "#option-keys")
+    def change(self, event: OptionList.OptionSelected) -> None:
+        index = event.option_index
+        key = self.keys[index]
+        default, chosen = key.value(key.default), key.chosen(self.mod.options)
+        choices = [
+            (value.label, value.label + (" (default)" if value is default else ""))
+            for value in key.values
+        ]
+
+        def done(label: str | None) -> None:
+            if label is not None:
+                self.library.set_option(self.mod, key, label)
+                self.rebuild(index)
+
+        self.app.push_screen(
+            ChoiceScreen(
+                f"{key.section} / {key.name}", choices, selected=chosen.label if chosen else None
+            ),
+            done,
+        )
+
+    def action_close(self) -> None:
         self.dismiss(None)
 
 
@@ -399,7 +471,7 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         tree.clear()
         tree.root.expand()
         nodes = {"": tree.root}
-        for target in pathops.apply_ops(self.base, self.ops):
+        for target, source in pathops.apply_ops(self.base, self.ops).items():
             if self.filter and not self._matches(target):
                 continue
             parts = target.split("/")
@@ -409,7 +481,13 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
                     parent = nodes["/".join(parts[: depth - 1])]
                     expand = bool(self.filter) or path not in self.collapsed
                     nodes[path] = parent.add(escape(parts[depth - 1]), data=path, expand=expand)
-            nodes[target] = nodes["/".join(parts[:-1])].add_leaf(escape(parts[-1]), data=target)
+            # a file deployed under another name than it has in the mod shows where it is from:
+            # the variant chosen for an option, or a file renamed by a path operation
+            came_from = source.rpartition("/")[2]
+            label = parts[-1]
+            if came_from.casefold() != label.casefold():
+                label += f"  \u2190 {came_from}"
+            nodes[target] = nodes["/".join(parts[:-1])].add_leaf(escape(label), data=target)
         # put the cursor back on the same entry, or the closest folder that still exists
         while selected and selected not in nodes:
             selected = selected.rpartition("/")[0]

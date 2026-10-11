@@ -23,13 +23,14 @@ from ..core.metadata import MetadataError
 from ..core.models import Mod, PathOp, ProfileEntry
 from ..core.nexus import GAME, NexusClient, NexusError, NxmLink, newest_file_id, parse_nxm
 from .screens import (
+    ChoiceScreen,
     ConfirmScreen,
     ConflictsScreen,
     GroupScreen,
     NexusAddScreen,
+    OptionsScreen,
     PathOpsScreen,
     TextPromptScreen,
-    ToolsScreen,
 )
 
 ENABLED = "✓"
@@ -64,6 +65,7 @@ class ModManApp(App[None]):
         Binding("J,ctrl+down", "move(1)", "Down"),
         Binding("r", "rename", "Rename"),
         Binding("g", "group", "Group"),
+        Binding("p", "options", "Options"),
         Binding("n", "add_nexus", "Nexus"),
         Binding("i", "import_file", "Import"),
         Binding("e", "edit_paths", "Paths"),
@@ -176,6 +178,14 @@ class ModManApp(App[None]):
         style = "" if enabled else "dim"
         return [Text(cell, style=style) for cell in (number, ENABLED if enabled else "", *rest)]
 
+    def _options_note(self, mod: Mod) -> str:
+        """Says that a mod has package options, and how many differ from the defaults."""
+        keys = [key for package in self.library.options(mod) for key in package.keys]
+        if not keys:
+            return ""
+        changed = sum(not key.is_default(mod.options) for key in keys)
+        return f"options ({changed} changed)" if changed else "options"
+
     def _overwrites_note(self, mod: Mod) -> str:
         """Names the mod this one is declared to overwrite, or counts them if several."""
         targets = list(dict.fromkeys(overwrite.mod for overwrite in mod.overwrites))
@@ -202,6 +212,7 @@ class ModManApp(App[None]):
             cells = ("", addin.name, addin.version, "", kind, source, "", "")
             table.add_row(*self._cells(addin.enabled, cells), key=f"addin:{addin.uid}")
         for index, (entry, mod) in enumerate(self.library.ordered(), 1):
+            options_note = self._options_note(mod)
             notes = [
                 note
                 for note, active in (
@@ -209,6 +220,7 @@ class ModManApp(App[None]):
                     ("conflict", entry.enabled and mod.id in conflicting),
                     ("update", mod.id in self.updates),
                     (self._overwrites_note(mod), bool(mod.overwrites)),
+                    (options_note, bool(options_note)),
                 )
                 if active
             ]
@@ -309,6 +321,16 @@ class ModManApp(App[None]):
 
         groups = sorted({e.group for e in self.library.profile.mods if e.group}, key=str.casefold)
         self.push_screen(GroupScreen(entry.group, groups), done)
+
+    def action_options(self) -> None:
+        """Choose the variants an override package offers."""
+        mod = self.current_mod()
+        if not mod:
+            return
+        if not any(package.keys for package in self.library.options(mod)):
+            self.notify(f"{mod.name} has no options", markup=False)
+            return
+        self.push_screen(OptionsScreen(self.library, mod), lambda _: self.refresh_table())
 
     def action_edit_paths(self) -> None:
         mod = self.current_mod()
@@ -595,7 +617,7 @@ class ModManApp(App[None]):
             if tool:
                 self.run_tool(tool)
 
-        self.push_screen(ToolsScreen(tools), done)
+        self.push_screen(ChoiceScreen("Tools", tools), done)
 
     def run_tool(self, tool: str) -> None:
         install_dir = self.config.game_install_dir

@@ -76,6 +76,11 @@ ModalScreen {
     height: 1fr;
 }
 
+#option-keys {
+    height: auto;
+    max-height: 24;
+}
+
 #groups {
     height: auto;
     max-height: 10;
