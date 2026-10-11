@@ -35,6 +35,7 @@ from .screens import (
     PathOpsScreen,
     ProgressScreen,
     TextPromptScreen,
+    UnapplyScreen,
 )
 
 ENABLED = "✓"
@@ -599,29 +600,80 @@ class ModManApp(App[None]):
         self.notify(message)
 
     def action_unapply(self) -> None:
-        if not self.config.dirs.deployed_file.exists():
-            self.notify("Nothing is applied")
-            return
+        self.start_unapply()
 
-        def done(confirmed: bool | None) -> None:
-            if confirmed:
-                self.run_unapply()
-
-        self.push_screen(ConfirmScreen("Remove all applied mod files from the game?"), done)
+    @staticmethod
+    def _foreign_message(foreign: deploy.Foreign) -> str:
+        lines = ["The mod directories contain things that dao-modman does not manage:", ""]
+        if foreign.unmanaged:
+            lines.append(f"  {len(foreign.unmanaged)} file(s) it has no record of, for example")
+            lines += [f"    {path}" for path in foreign.unmanaged[:4]]
+        if foreign.modified:
+            lines.append(f"  {len(foreign.modified)} applied file(s) that were changed since")
+            lines += [f"    {path}" for path in foreign.modified[:4]]
+        if foreign.addins:
+            lines.append(f"  AddIns registered by something else: {', '.join(foreign.addins)}")
+        lines += ["", "A plain unapply leaves them where they are."]
+        return "\n".join(lines)
 
     @work
-    async def run_unapply(self) -> None:
+    async def start_unapply(self) -> None:
+        """Unapply, first asking what to do about anything else in the mod directories."""
+        applied = self.config.dirs.deployed_file.exists()
+        user_dir = self.config.game_user_dir
+        foreign = deploy.Foreign()
+        if user_dir and user_dir.is_dir():
+            try:
+                foreign = await self.run_with_progress(
+                    "Checking the mod directories",
+                    deploy.scan,
+                    user_dir,
+                    self.config.dirs.deployed_file,
+                    self.config.game_install_dir,
+                )
+            except (deploy.DeployError, addins.AddInsError, OSError, ValueError) as exc:
+                self.error(exc)
+                return
+        if not foreign:
+            if not applied:
+                self.notify("Nothing is applied")
+            elif await self.push_screen_wait(
+                ConfirmScreen("Remove all applied mod files from the game?")
+            ):
+                await self.unapply(clean=False)
+            return
+        choice = await self.push_screen_wait(UnapplyScreen(self._foreign_message(foreign)))
+        if choice == "all":
+            await self.unapply(clean=True)
+        elif choice == "ours" and applied:
+            await self.unapply(clean=False)
+        elif choice == "ours":
+            self.notify("Nothing is applied")
+
+    async def unapply(self, *, clean: bool) -> None:
+        """Remove our files; with `clean`, everything else in the mod directories too."""
+        deployed_file = self.config.dirs.deployed_file
         try:
             result = await self.run_with_progress(
-                "Removing applied mods", deploy.unapply, self.config.dirs.deployed_file
+                "Removing applied mods", deploy.unapply, deployed_file
             )
-        except (deploy.DeployError, OSError, ValueError) as exc:
+            cleaned = 0
+            if clean and self.config.game_user_dir:
+                cleaned = await asyncio.to_thread(
+                    deploy.clean,
+                    self.config.game_user_dir,
+                    deployed_file,
+                    self.config.game_install_dir,
+                )
+        except (deploy.DeployError, addins.AddInsError, OSError, ValueError) as exc:
             self.error(exc)
             return
         finally:
-            self.refresh_status()
-        message = f"Removed {result.removed} file(s)"
-        if result.kept:
+            self.refresh_table()
+        message = f"Removed {result.removed} applied file(s)"
+        if clean:
+            message += f" and {cleaned} that dao-modman did not manage"
+        elif result.kept:
             message += f", kept {len(result.kept)} modified file(s)"
         self.notify(message)
 

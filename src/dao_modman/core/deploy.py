@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import os
 import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -420,3 +421,104 @@ def unapply(deployed_file: Path, progress: Progress | None = None) -> UnapplyRes
         result.addins = addins.unregister(addins_xml, uids)
     deployed_file.unlink()
     return result
+
+
+# The places in the game's user dir that hold nothing but mods.
+MOD_DIRS = ("packages", "AddIns")
+KEPT_DIRS = ("packages/core/override", "AddIns")  # empty folders the game expects
+
+
+@dataclass
+class Foreign:
+    """What is in the mod directories without being an unchanged file of ours."""
+
+    unmanaged: list[str] = field(default_factory=list)  # files we have no record of
+    modified: list[str] = field(default_factory=list)  # applied by us, changed since
+    addins: list[str] = field(default_factory=list)  # AddIns registered by something else
+
+    def __bool__(self) -> bool:
+        return bool(self.unmanaged or self.modified or self.addins)
+
+
+def _external_addins(user_dir: Path, install_dir: Path | None, ours: set[str]) -> list[str]:
+    shipped = addins.shipped_uids(install_dir)
+    return [
+        addin.uid
+        for addin in addins.list_registered(user_dir)
+        if addins.classify(addin, ours, shipped) == addins.EXTERNAL
+    ]
+
+
+def _official_dirs(user_dir: Path, install_dir: Path | None) -> set[str]:
+    """Folders of official DLC inside the user dir (editions that download DLC there)."""
+    shipped = addins.shipped_uids(install_dir)
+    return {
+        f"addins/{addin.uid.casefold()}"
+        for addin in addins.list_registered(user_dir)
+        if addins.classify(addin, set(), shipped) == addins.OFFICIAL
+    }
+
+
+def _mod_dir_entries(user_dir: Path, protected: set[str]) -> list[tuple[str, Path]]:
+    """Files (and links, which are never followed) below the mod directories."""
+    found = []
+    for name in MOD_DIRS:
+        top = resolve_case(user_dir, name)
+        if top.is_symlink() or not top.is_dir():
+            continue
+        for root, dirnames, filenames in os.walk(top):
+            links = [name for name in dirnames if Path(root, name).is_symlink()]
+            for entry in [*filenames, *links]:
+                path = Path(root, entry)
+                rel = path.relative_to(user_dir).as_posix()
+                if not any(f"{rel.casefold()}/".startswith(f"{folder}/") for folder in protected):
+                    found.append((rel, path))
+    return sorted(found)
+
+
+def scan(
+    user_dir: Path,
+    deployed_file: Path,
+    install_dir: Path | None = None,
+    progress: Progress | None = None,
+) -> Foreign:
+    """Find what a plain unapply would leave behind in the mod directories."""
+    record = load_record(deployed_file) or {}
+    applied = {item["path"].casefold(): item.get("sha256") for item in record.get("files", [])}
+    foreign = Foreign()
+    entries = _mod_dir_entries(user_dir, _official_dirs(user_dir, install_dir))
+    for index, (rel, path) in enumerate(entries):
+        if rel.casefold() not in applied:
+            foreign.unmanaged.append(rel)
+        elif path.is_symlink() or sha256_file(path) != applied[rel.casefold()]:
+            foreign.modified.append(rel)
+        if progress:
+            progress("Checking files", index + 1, len(entries))
+    foreign.addins = _external_addins(user_dir, install_dir, set(record.get("addins", [])))
+    return foreign
+
+
+def clean(user_dir: Path, deployed_file: Path, install_dir: Path | None = None) -> int:
+    """Empty the mod directories of everything but official DLC. Unapply first.
+
+    Removes files installed by hand or by other tools, and the AddIns they registered.
+    Returns the number of files removed.
+    """
+    if load_record(deployed_file) is not None:
+        raise DeployError("unapply before cleaning the mod directories")
+    protected = _official_dirs(user_dir, install_dir)
+    entries = _mod_dir_entries(user_dir, protected)
+    for _rel, path in entries:
+        path.unlink()
+    kept = {resolve_case(user_dir, rel) for rel in KEPT_DIRS}
+    for name in MOD_DIRS:
+        top = resolve_case(user_dir, name)
+        if top.is_symlink() or not top.is_dir():
+            continue
+        for root, _dirnames, _filenames in os.walk(top, topdown=False):
+            if Path(root) not in kept and Path(root) != top:
+                with contextlib.suppress(OSError):  # not empty: official DLC inside
+                    Path(root).rmdir()
+    if external := _external_addins(user_dir, install_dir, set()):
+        addins.unregister(resolve_case(user_dir, addins.ADDINS_REL), external)
+    return len(entries)

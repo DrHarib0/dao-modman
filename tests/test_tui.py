@@ -28,6 +28,15 @@ def make_app(tmp_path: Path, dirs: Dirs, user_dir: Path, **kwargs) -> ModManApp:
     return ModManApp(Config(dirs=dirs, game_user_dir=user_dir), **kwargs)
 
 
+async def until(pilot, condition) -> None:
+    """Let the app work until `condition()` holds (background work decides when)."""
+    for _ in range(200):
+        if condition():
+            return
+        await pilot.pause(0.02)
+    raise AssertionError("condition was not met in time")
+
+
 def rows(app: ModManApp) -> list[list[str]]:
     table = app.query_one("#mods", DataTable)
     return [[str(cell) for cell in table.get_row_at(i)] for i in range(table.row_count)]
@@ -115,7 +124,9 @@ async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_
         assert (user_dir / OVERRIDE / "renamed/b.erf").read_text() == "a"
         assert not (user_dir / OVERRIDE / "mod").exists()
 
-        await pilot.press("x", "y")
+        await pilot.press("x")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        await pilot.press("y")
         await app.workers.wait_for_complete()
         assert not (user_dir / "packages").exists()
 
@@ -910,3 +921,65 @@ async def test_apply_runs_behind_a_progress_dialog(
         assert (user_dir / OVERRIDE / "one/a.erf").is_file()
         await pilot.press("space")  # keys work again
         assert rows(app)[0][1] == ""
+
+
+async def test_unapply_offers_to_clean_the_mod_directories(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    from dao_modman.tui.screens import UnapplyScreen
+
+    Library(dirs).import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1", "b.erf": "2"}))
+    manual = user_dir / OVERRIDE / "by hand/c.erf"
+
+    def files() -> list[str]:
+        return sorted(
+            p.relative_to(user_dir).as_posix() for p in user_dir.rglob("*") if p.is_file()
+        )
+
+    async def apply(pilot, app) -> None:
+        await pilot.press("a", "y")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    async def unapply(pilot, app, answer: str) -> None:
+        await pilot.press("x")
+        await until(pilot, lambda: isinstance(app.screen, UnapplyScreen))
+        await pilot.press(answer)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("x")  # nothing applied, nothing foreign
+        await app.workers.wait_for_complete()
+        assert [n.message for n in app._notifications][-1] == "Nothing is applied"
+
+        await apply(pilot, app)
+        manual.parent.mkdir(parents=True)
+        manual.write_text("installed by hand")
+        (user_dir / OVERRIDE / "one/a.erf").write_text("edited")
+
+        await pilot.press("x")
+        await until(pilot, lambda: isinstance(app.screen, UnapplyScreen))
+        text = app.screen.message
+        assert "1 file(s) it has no record of" in text and "by hand/c.erf" in text
+        assert "1 applied file(s) that were changed since" in text
+        await pilot.press("enter")  # enter must not confirm something that cannot be undone
+        assert isinstance(app.screen, UnapplyScreen)
+        await pilot.press("n")
+        await app.workers.wait_for_complete()
+        assert len(files()) == 3
+
+        # "o": only what dao-modman applied and nobody changed
+        await unapply(pilot, app, "o")
+        assert files() == [f"{OVERRIDE}/by hand/c.erf", f"{OVERRIDE}/one/a.erf"]
+        assert "kept 1 modified" in [n.message for n in app._notifications][-1]
+
+        # "y": everything, also when nothing of ours is applied any more
+        await unapply(pilot, app, "y")
+        assert files() == []
+        assert (user_dir / OVERRIDE).is_dir()
+        assert "2 that dao-modman did not manage" in [n.message for n in app._notifications][-1]
+
+        await apply(pilot, app)  # and a fresh apply is complete again
+        assert files() == [f"{OVERRIDE}/one/a.erf", f"{OVERRIDE}/one/b.erf"]

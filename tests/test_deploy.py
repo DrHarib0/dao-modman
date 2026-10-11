@@ -457,3 +457,69 @@ def test_progress_and_folder_casing(tmp_path: Path, library: Library, user_dir: 
     seen.clear()
     deploy.unapply(deployed, lambda *step: seen.append(step))
     assert seen == [("Removing applied files", 1, 2), ("Removing applied files", 2, 2)]
+
+
+def test_scan_and_clean_the_mod_directories(
+    tmp_path: Path, library: Library, user_dir: Path
+) -> None:
+    install_dir = tmp_path / "install"
+    (install_dir / "Addins/dao_prc_ep_1").mkdir(parents=True)
+    (user_dir / "Settings").mkdir()
+    (user_dir / "Settings/AddIns.xml").write_text(
+        '<AddInsList><AddInItem UID="DAO_PRC_EP_1" BioWare="1"/>'
+        '<AddInItem UID="bought_dlc" BioWare="1"/><AddInItem UID="by_hand"/></AddInsList>'
+    )
+    (user_dir / "Settings/DragonAge.ini").write_text("settings")
+    (user_dir / "Characters").mkdir()
+    (user_dir / "Characters/save.das").write_text("save game")
+    library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a", "b.erf": "b"}))
+    library.import_archive(make_dazip(tmp_path / "x.dazip", uid="mine"))
+    deployed = library.dirs.deployed_file
+    deploy.apply(deploy.build_plan(library), user_dir, deployed)
+
+    # our own unchanged files are not reported; an AddIn entry of unknown origin is
+    first = deploy.scan(user_dir, deployed, install_dir)
+    assert (first.unmanaged, first.modified, first.addins) == ([], [], ["by_hand"])
+
+    outside = tmp_path / "elsewhere"
+    outside.mkdir()
+    (outside / "precious.txt").write_text("not ours to delete")
+    foreign_files = {
+        f"{OVERRIDE}/manual/tex.dds": "by hand",
+        "packages/core/data/fonts.erf": "by hand",
+        "AddIns/by_hand/core/data/x.erf": "another manager",
+        "AddIns/bought_dlc/core/data/dlc.erf": "official DLC stored in the user dir",
+    }
+    for rel, content in foreign_files.items():
+        (user_dir / rel).parent.mkdir(parents=True, exist_ok=True)
+        (user_dir / rel).write_text(content)
+    (user_dir / OVERRIDE / "link").symlink_to(outside, target_is_directory=True)
+    (user_dir / OVERRIDE / "one/a.erf").write_text("edited")
+
+    seen: list[tuple[str, int, int]] = []
+    foreign = deploy.scan(user_dir, deployed, install_dir, lambda *step: seen.append(step))
+    assert foreign.unmanaged == [
+        "AddIns/by_hand/core/data/x.erf",
+        "packages/core/data/fonts.erf",
+        f"{OVERRIDE}/link",
+        f"{OVERRIDE}/manual/tex.dds",
+    ]
+    assert foreign.modified == [f"{OVERRIDE}/one/a.erf"]
+    assert foreign.addins == ["by_hand"]  # not ours, not official
+    assert seen[-1][0] == "Checking files" and seen[-1][1] == seen[-1][2]
+
+    with pytest.raises(deploy.DeployError, match="unapply before"):
+        deploy.clean(user_dir, deployed, install_dir)
+    deploy.unapply(deployed)
+    assert deploy.clean(user_dir, deployed, install_dir) == 5
+
+    assert tree(user_dir) == [
+        "AddIns/bought_dlc/core/data/dlc.erf",  # official DLC is never touched
+        "Characters/save.das",
+        "Settings/AddIns.xml",
+        "Settings/DragonAge.ini",
+    ]
+    assert addin_uids(user_dir) == ["DAO_PRC_EP_1", "bought_dlc"]
+    assert (user_dir / OVERRIDE).is_dir() and not (user_dir / "packages/core/data").exists()
+    assert (outside / "precious.txt").read_text() == "not ours to delete"  # link not followed
+    assert not deploy.scan(user_dir, deployed, install_dir)

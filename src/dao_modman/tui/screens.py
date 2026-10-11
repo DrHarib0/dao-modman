@@ -40,6 +40,35 @@ class ConfirmScreen(ModalScreen[bool]):
         self.dismiss(value)
 
 
+class UnapplyScreen(ModalScreen[str | None]):
+    """Asked when unapply would leave things behind. Result: "all", "ours" or None.
+
+    Removing everything cannot be undone, so enter does not confirm here.
+    """
+
+    BINDINGS = [
+        Binding("y", "answer('all')", "Remove everything"),
+        Binding("o", "answer('ours')", "Only dao-modman's files"),
+        Binding("n,escape", "answer(None)", "Cancel"),
+    ]
+
+    def __init__(self, message: str) -> None:
+        super().__init__()
+        self.message = message
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog wide"):
+            yield Static(self.message, markup=False)
+            yield Label(
+                "[b]y[/] remove everything (cannot be undone)   "
+                "[b]o[/] only dao-modman's files   [b]n[/] cancel",
+                classes="hint",
+            )
+
+    def action_answer(self, value: str | None) -> None:
+        self.dismiss(value)
+
+
 class ProgressScreen(ModalScreen[None]):
     """Shown while a long operation runs. It has no keys: the operation cannot be left."""
 
