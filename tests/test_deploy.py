@@ -356,3 +356,104 @@ def test_accept_and_remove_overwrite(tmp_path: Path, library: Library) -> None:
     assert not library.remove_overwrite("top", ["base"], "a.gda")  # cannot carve out one file
     assert library.remove_overwrite("top", ["base"])
     assert stored() == []
+
+
+def test_failed_apply_is_rolled_back(
+    tmp_path: Path, library: Library, user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """All or nothing: a failure part-way leaves no file, folder, AddIn or record behind."""
+    (user_dir / "Settings").mkdir()
+    (user_dir / "Settings/AddIns.xml").write_text('<AddInsList><AddInItem UID="dlc"/></AddInsList>')
+    (user_dir / "keep.txt").write_text("mine")
+    library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a", "sub/b.erf": "b"}))
+    library.import_archive(make_dazip(tmp_path / "x.dazip", uid="mine"))
+    before = tree(user_dir)
+    deployed = library.dirs.deployed_file
+
+    real_write = deploy._write_hashed
+    calls = {"n": 0}
+
+    def failing_write(planned: deploy.PlannedFile, dest: Path) -> str:
+        calls["n"] += 1
+        if calls["n"] == 3:
+            raise OSError("disk full")
+        return real_write(planned, dest)
+
+    monkeypatch.setattr(deploy, "_write_hashed", failing_write)
+    with pytest.raises(deploy.DeployError, match="rolled back: disk full"):
+        deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert tree(user_dir) == before
+    assert not (user_dir / "packages").exists() and not (user_dir / "addins").exists()
+    assert not deployed.exists()
+
+    # a failure at the very end, while registering AddIns, undoes the copied files too
+    monkeypatch.setattr(deploy, "_write_hashed", real_write)
+    monkeypatch.setattr(deploy.addins, "register", lambda *_: (_ for _ in ()).throw(OSError("no")))
+    with pytest.raises(deploy.DeployError, match="rolled back"):
+        deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert tree(user_dir) == before and not deployed.exists()
+    assert addin_uids(user_dir) == ["dlc"]
+
+    # an interruption (ctrl+c) is rolled back as well, and passed on unchanged
+    monkeypatch.undo()
+    monkeypatch.setattr(
+        deploy, "_write_hashed", lambda *_: (_ for _ in ()).throw(KeyboardInterrupt())
+    )
+    with pytest.raises(KeyboardInterrupt):
+        deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert tree(user_dir) == before and not deployed.exists()
+
+
+def test_apply_cut_short_is_rolled_back_on_the_next_run(
+    tmp_path: Path, library: Library, user_dir: Path
+) -> None:
+    """A killed process leaves the intent behind; the next run undoes it."""
+    (user_dir / "keep.txt").write_text("mine")
+    library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a", "b.erf": "b"}))
+    deployed = library.dirs.deployed_file
+    deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    complete = json.loads(deployed.read_text())
+    assert complete["state"] == "applied"
+    assert not deploy.rollback(deployed)  # a finished apply is not rolled back
+
+    # what a kill after the first file would leave: the intent, and one of the two files
+    intent = {
+        **complete,
+        "state": "applying",
+        "files": [{"path": f["path"]} for f in complete["files"]],
+    }
+    deployed.write_text(json.dumps(intent))
+    (user_dir / OVERRIDE / "one/b.erf").unlink()
+
+    assert deploy.rollback(deployed)
+    assert tree(user_dir) == ["keep.txt"] and not deployed.exists()
+    assert not (user_dir / "packages").exists()
+
+    # the same leftover is also cleared by a plain apply or unapply
+    for action in ("apply", "unapply"):
+        (user_dir / OVERRIDE / "one").mkdir(parents=True)
+        (user_dir / OVERRIDE / "one/a.erf").write_text("a")
+        deployed.write_text(json.dumps(intent))
+        if action == "apply":
+            deploy.apply(deploy.build_plan(library), user_dir, deployed)
+            assert tree(user_dir) == ["keep.txt", f"{OVERRIDE}/one/a.erf", f"{OVERRIDE}/one/b.erf"]
+            deploy.unapply(deployed)
+        else:
+            assert deploy.unapply(deployed).removed == 0
+        assert tree(user_dir) == ["keep.txt"]
+
+
+def test_progress_and_folder_casing(tmp_path: Path, library: Library, user_dir: Path) -> None:
+    for name, folder in (("one", "Shared"), ("two", "shared")):
+        mod = library.import_archive(make_zip(tmp_path / f"{name}.zip", {f"{name}.erf": name}))
+        mod.ops = [PathOp("rename", f"{OVERRIDE}/{name}", f"extra/{folder}")]
+    seen: list[tuple[str, int, int]] = []
+    deployed = library.dirs.deployed_file
+    deploy.apply(deploy.build_plan(library), user_dir, deployed, lambda *step: seen.append(step))
+    # both mods end up in one folder although it did not exist before either was copied
+    assert tree(user_dir) == ["extra/Shared/one.erf", "extra/Shared/two.erf"]
+    assert seen == [("Copying files", 1, 2), ("Copying files", 2, 2)]
+
+    seen.clear()
+    deploy.unapply(deployed, lambda *step: seen.append(step))
+    assert seen == [("Removing applied files", 1, 2), ("Removing applied files", 2, 2)]

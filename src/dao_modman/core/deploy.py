@@ -5,6 +5,8 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import xml.etree.ElementTree as ET
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -21,6 +23,13 @@ _CHUNK = 1024 * 1024
 
 class DeployError(Exception):
     pass
+
+
+APPLYING = "applying"  # intent written, files being copied: to be rolled back if found
+APPLIED = "applied"
+
+# Called as progress(what is being done, items done, items in total).
+Progress = Callable[[str, int, int], None]
 
 
 MERGED = "(merged)"
@@ -257,67 +266,152 @@ def _write_hashed(planned: PlannedFile, dest: Path) -> str:
     return digest.hexdigest()
 
 
-def _make_parents(user_dir: Path, directory: Path, created: list[str]) -> None:
-    missing = []
-    current = directory
-    while current != user_dir and not current.exists():
-        missing.append(current)
-        current = current.parent
-    directory.mkdir(parents=True, exist_ok=True)
-    created += [path.relative_to(user_dir).as_posix() for path in reversed(missing)]
+class _Resolver:
+    """Maps target paths to real paths, reusing the casing of what exists or is planned.
+
+    Like `resolve_case`, but it also remembers folders that are only about to be created, so
+    that `Packages/a` and `packages/b` end up in one folder even before either exists.
+    """
+
+    def __init__(self, user_dir: Path) -> None:
+        self.user_dir = user_dir
+        self._children: dict[Path, dict[str, Path]] = {}
+
+    def _listing(self, directory: Path) -> dict[str, Path]:
+        if directory not in self._children:
+            entries = directory.iterdir() if directory.is_dir() else []
+            self._children[directory] = {entry.name.casefold(): entry for entry in entries}
+        return self._children[directory]
+
+    def resolve(self, target: str) -> Path:
+        current = self.user_dir
+        for part in target.split("/"):
+            current = self._listing(current).setdefault(part.casefold(), current / part)
+        return current
 
 
-def apply(plan: Plan, user_dir: Path, deployed_file: Path) -> ApplyResult:
-    """Replace the current deployment (if any) with `plan`."""
+def _missing_dirs(user_dir: Path, paths: list[Path]) -> list[str]:
+    """Folders that have to be created for `paths`, parents first."""
+    missing: dict[Path, None] = {}
+    for path in paths:
+        chain = []
+        current = path.parent
+        while current != user_dir and not current.exists() and current not in missing:
+            chain.append(current)
+            current = current.parent
+        missing.update(dict.fromkeys(reversed(chain)))
+    return [path.relative_to(user_dir).as_posix() for path in missing]
+
+
+def _undo(record: dict) -> None:
+    """Remove everything an unfinished apply set out to create.
+
+    Every listed path was absent when that run started, so nothing foreign is touched.
+    """
+    user_dir = Path(record["user_dir"])
+    for item in record.get("files", []):
+        path = user_dir / normalize_rel(item["path"])
+        if path.is_file() or path.is_symlink():
+            path.unlink()
+    for rel in sorted(record.get("dirs", []), key=lambda d: d.count("/"), reverse=True):
+        with contextlib.suppress(OSError):  # not empty or never created
+            (user_dir / normalize_rel(rel)).rmdir()
+    if uids := record.get("addins"):
+        with contextlib.suppress(ET.ParseError, OSError, ValueError):
+            addins.unregister(resolve_case(user_dir, addins.ADDINS_REL), uids)
+
+
+def rollback(deployed_file: Path) -> bool:
+    """Undo an apply that was cut short (process killed). True if there was one."""
+    record = load_record(deployed_file)
+    if record is None or record.get("state") != APPLYING:
+        return False
+    _undo(record)
+    deployed_file.unlink()
+    return True
+
+
+def apply(
+    plan: Plan, user_dir: Path, deployed_file: Path, progress: Progress | None = None
+) -> ApplyResult:
+    """Replace the current deployment (if any) with `plan`, all or nothing.
+
+    The intent is written down before the first file is copied. If anything fails, what this
+    run created is removed again and nothing is applied; if the process dies, `rollback`
+    does the same on the next start.
+    """
     if not user_dir.is_dir():
         raise DeployError(f"game user dir not found: {user_dir}")
-    unapply(deployed_file)
+    unapply(deployed_file, progress)
 
     result = ApplyResult()
-    record: dict = {"user_dir": str(user_dir), "files": [], "dirs": [], "addins": []}
+    resolver = _Resolver(user_dir)
+    writes: dict[Path, PlannedFile] = {}
+    for planned in plan.files:
+        dest = resolver.resolve(planned.target)
+        if dest in writes or dest.exists() or dest.is_symlink():
+            result.skipped.append(planned.target)
+        else:
+            writes[dest] = planned
+    addins_xml = resolve_case(user_dir, addins.ADDINS_REL)
     try:
-        for planned in plan.files:
-            dest = resolve_case(user_dir, planned.target)
-            if dest.exists() or dest.is_symlink():
-                result.skipped.append(planned.target)
-                continue
-            _make_parents(user_dir, dest.parent, record["dirs"])
-            digest = _write_hashed(planned, dest)
-            record["files"].append(
-                {
-                    "path": dest.relative_to(user_dir).as_posix(),
-                    "sha256": digest,
-                    "mod": planned.mod_id,
-                }
-            )
-            result.written += 1
-        if plan.addins:
-            addins_xml = resolve_case(user_dir, addins.ADDINS_REL)
-            _make_parents(user_dir, addins_xml.parent, record["dirs"])
-            record["addins"] = result.addins = addins.register(addins_xml, plan.addins)
-    finally:
-        # Also record a partial deployment, so it can be unapplied.
-        if record["files"] or record["dirs"] or record["addins"]:
-            _save_record(deployed_file, record)
+        new_addins = addins.absent(addins_xml, plan.addins)
+    except (ET.ParseError, OSError, ValueError) as exc:
+        raise DeployError(f"cannot read {addins_xml}: {exc}") from exc
+
+    files = [
+        {"path": dest.relative_to(user_dir).as_posix(), "mod": planned.mod_id}
+        for dest, planned in writes.items()
+    ]
+    record: dict = {
+        "state": APPLYING,
+        "user_dir": str(user_dir),
+        "files": files,
+        "dirs": _missing_dirs(user_dir, [*writes, addins_xml] if new_addins else list(writes)),
+        "addins": new_addins,
+    }
+    _save_record(deployed_file, record)
+    try:
+        for index, (dest, planned) in enumerate(writes.items()):
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            files[index]["sha256"] = _write_hashed(planned, dest)
+            if progress:
+                progress("Copying files", index + 1, len(writes))
+        if new_addins:
+            addins_xml.parent.mkdir(parents=True, exist_ok=True)
+            addins.register(addins_xml, plan.addins)
+    except BaseException as exc:
+        _undo(record)
+        deployed_file.unlink(missing_ok=True)
+        if isinstance(exc, Exception):
+            raise DeployError(f"apply failed and was rolled back: {exc}") from exc
+        raise
+    record["state"] = APPLIED
+    _save_record(deployed_file, record)
+    result.written, result.addins = len(writes), new_addins
     return result
 
 
-def unapply(deployed_file: Path) -> UnapplyResult:
+def unapply(deployed_file: Path, progress: Progress | None = None) -> UnapplyResult:
     """Remove what the last apply wrote, leaving modified files alone."""
     result = UnapplyResult()
+    if rollback(deployed_file):
+        return result
     record = load_record(deployed_file)
     if record is None:
         return result
     user_dir = Path(record["user_dir"])
-    for item in record.get("files", []):
+    items = record.get("files", [])
+    for index, item in enumerate(items):
         path = user_dir / normalize_rel(item["path"])
-        if path.is_symlink() or not path.is_file():
-            continue
-        if sha256_file(path) == item["sha256"]:
-            path.unlink()
-            result.removed += 1
-        else:
-            result.kept.append(item["path"])
+        if not path.is_symlink() and path.is_file():
+            if sha256_file(path) == item["sha256"]:
+                path.unlink()
+                result.removed += 1
+            else:
+                result.kept.append(item["path"])
+        if progress:
+            progress("Removing applied files", index + 1, len(items))
     for rel in sorted(record.get("dirs", []), key=lambda d: d.count("/"), reverse=True):
         with contextlib.suppress(OSError):  # not empty or already gone
             (user_dir / normalize_rel(rel)).rmdir()

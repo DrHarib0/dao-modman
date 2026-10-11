@@ -118,6 +118,15 @@ class ModManApp(App[None]):
         self.refresh_table()
         for error in self.library.errors:
             self.notify(error, severity="error", timeout=15, markup=False)
+        try:
+            if deploy.rollback(self.config.dirs.deployed_file):
+                self.notify(
+                    "The last apply did not finish and has been rolled back: nothing is applied",
+                    severity="warning",
+                    timeout=15,
+                )
+        except (deploy.DeployError, OSError, ValueError) as exc:
+            self.error(exc)
         if self.nexus:
             self.load_account()
         await self.listen()

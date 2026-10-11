@@ -74,6 +74,17 @@ def _save(path: Path, root: ET.Element) -> None:
     write_atomic(path, ET.tostring(root, encoding="utf-8", xml_declaration=True))
 
 
+def absent(addins_xml: Path, addins: list[AddIn]) -> list[str]:
+    """UIDs of `addins` that `register` would add, i.e. that are not registered yet."""
+    present = {(item.get("UID") or "").casefold() for item in _load(addins_xml).iter("AddInItem")}
+    missing: list[str] = []
+    for addin in addins:
+        if addin.uid.casefold() not in present:
+            present.add(addin.uid.casefold())
+            missing.append(addin.uid)
+    return missing
+
+
 def register(addins_xml: Path, addins: list[AddIn]) -> list[str]:
     """Add missing AddIns; returns the UIDs that were actually added."""
     if not addins:
