@@ -51,6 +51,7 @@ The bar at the bottom shows the everyday keys; `?` lists all of them.
 | `c`              | check Nexus for updates                  |
 | `u`              | update the selected mod in place         |
 | `v`              | conflict report                          |
+| `L`              | items the mod adds, by in-game name      |
 | `a` / `x`        | apply / unapply                          |
 | `l`              | launch the game through Steam            |
 | `h`              | hide / show the game's official DLC      |
@@ -142,6 +143,15 @@ The list is `src/dao_modman/assets/presets.toml`, keyed by Nexus mod id and file
 differs from library to library. A `presets.toml` of the same format in
 `~/.config/dao-modman/` adds your own entries; an entry there replaces the shipped one for
 the same mod and file. Problems in that file are reported at startup and it is then ignored.
+
+### Items of a mod
+
+`L` lists the items the selected mod adds, by the names they have in game (what `getx`
+filters by) with the kind of item, e.g. Longsword or Helmet; `f` shows their file names
+next to them. Items that only replace one of the
+game's own are counted, not listed. Names are read from the talk tables of the language set
+with `language` in `config.toml` (default `"en-us"`): the game's, the enabled mods', and
+the mod's own.
 
 ### Item tables of "Add Any Item Visual Deluxe"
 
@@ -362,6 +372,8 @@ is installed through dao-modman, it offers the predefined path operation that ro
         addins.py      # Settings/AddIns.xml
         chargen.py     # chargenmorphcfg.xml merging and its report
         itemlists.py   # item tables for the Add Any Item mod, written at apply
+        moditems.py    # the items a mod adds, by in-game name
+        gff.py         # readers for item files and talk tables
         erf.py         # reader for the game's ERF archives
         resources.py   # which resources the game and the enabled mods provide
         deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply, clean

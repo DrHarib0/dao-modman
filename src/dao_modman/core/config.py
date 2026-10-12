@@ -28,6 +28,7 @@ class Config:
     # .gitignore patterns for files inside mods that are never deployed
     ignore: list[str] = field(default_factory=lambda: list(DEFAULT_PATTERNS))
     presets_file: Path | None = None  # the user's own predefined path operations
+    language: str = "en-us"  # which talk tables item names are read from
 
 
 def load_token(config_dir: Path, cwd: Path | None = None) -> str | None:
@@ -67,4 +68,5 @@ def load_config() -> Config:
         runtime_dir=ipc.runtime_dir(),
         ignore=[str(p) for p in raw["ignore"]] if "ignore" in raw else list(DEFAULT_PATTERNS),
         presets_file=config_dir / "presets.toml",
+        language=str(raw.get("language") or "en-us"),
     )

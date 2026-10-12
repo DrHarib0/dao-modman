@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import zipfile
+from dataclasses import replace
 from pathlib import Path
 
 import httpx2
@@ -15,11 +16,13 @@ from dao_modman.tui.app import ModManApp
 from dao_modman.tui.screens import (
     ConfirmScreen,
     GroupScreen,
+    ItemsScreen,
     NexusAddScreen,
     PathOpsScreen,
 )
 
 from .conftest import make_zip
+from .gamefiles import make_tlk, make_uti
 
 OVERRIDE = "packages/core/override"
 
@@ -1139,3 +1142,52 @@ async def test_broken_user_presets_are_reported(tmp_path: Path, dirs: Dirs, user
     async with app.run_test(size=(140, 40)):
         assert any(str(user_file) in n.message for n in app._notifications)
         assert (1825, 9280) in app.presets.by_file
+
+
+async def test_item_list_of_a_mod(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    library = Library(dirs)
+    library.import_archive(
+        make_zip(
+            tmp_path / "Armory.zip",
+            {
+                "blade.uti": make_uti("blade", text="Blade of the Mod"),
+                "odd.uti": make_uti("odd"),
+                "armory_en-us.tlk": make_tlk(tmp_path / "t.tlk", {7: "Zebra Shield"}).read_bytes(),
+                "shield.uti": make_uti("shield", strref=7),
+            },
+        )
+    )
+    library.import_archive(make_zip(tmp_path / "Plain.zip", {"a.erf": "no items here"}))
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("L")
+        await until(pilot, lambda: isinstance(app.screen, ItemsScreen))
+        screen = app.screen
+        assert screen.title_text == "3 item(s) added by Armory"
+        text = lambda: str(screen.query_one("#items", Static).render())  # noqa: E731
+        assert text().splitlines() == ["Blade of the Mod", "odd.uti (no name)", "Zebra Shield"]
+        await pilot.press("f")
+        assert text().splitlines() == [
+            "Blade of the Mod   blade.uti",
+            "odd.uti (no name)",
+            "Zebra Shield       shield.uti",
+        ]
+        await pilot.press("f")
+        assert "blade.uti" not in text()
+        # with the kinds of items known, they are a column of their own
+        screen.items = [replace(item, type="Dagger" if item.named else "") for item in screen.items]
+        await pilot.press("f")
+        assert text().splitlines()[0] == "Blade of the Mod   Dagger  blade.uti"
+        await pilot.press("f")
+        assert text().splitlines() == [
+            "Blade of the Mod   Dagger",
+            "odd.uti (no name)",
+            "Zebra Shield       Dagger",
+        ]
+        await pilot.press("escape")
+
+        await pilot.press("down", "L")  # a mod without items only says so
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not isinstance(app.screen, ItemsScreen)
+        assert any("Plain has no items" in n.message for n in app._notifications)

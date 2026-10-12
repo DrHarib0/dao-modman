@@ -15,6 +15,7 @@ from ..core import archive as archives
 from ..core import deploy, nexus, pathops, report
 from ..core.library import Library
 from ..core.models import OP_REMOVE, OP_RENAME, Mod, PathOp
+from ..core.moditems import ModItem
 from ..core.nexus import NexusClient, NexusError, NxmLink
 from ..core.overridepkg import OptionKey
 
@@ -106,6 +107,57 @@ class TextScreen(ModalScreen[None]):
 
     def on_mount(self) -> None:
         self.query_one("#report").focus()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+class ItemsScreen(ModalScreen[None]):
+    """The items a mod adds: in-game name and kind of item; the file names on request."""
+
+    BINDINGS = [
+        Binding("escape,q", "close", "Close"),
+        Binding("f", "toggle_files", "File names"),
+    ]
+
+    def __init__(self, title: str, items: list[ModItem], footnotes: list[str]) -> None:
+        super().__init__()
+        self.title_text = title
+        self.items = items
+        self.footnotes = footnotes
+        self.show_files = False
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog wide tall"):
+            yield Label(self.title_text, classes="title", markup=False)
+            with VerticalScroll(id="report"):
+                yield Static(self.render_items(), id="items", markup=False)
+            yield Label(
+                "[b]f[/] file names   [b]\u2191 \u2193[/] scroll   [b]esc[/] close", classes="hint"
+            )
+
+    def render_items(self) -> str:
+        names = [item.name if item.named else f"{item.file} (no name)" for item in self.items]
+        width = max((len(name) for name in names), default=0)
+        kinds = max((len(item.type) for item in self.items), default=0)
+        lines = []
+        for name, item in zip(names, self.items, strict=True):
+            columns = [f"{name:<{width}}"]
+            if kinds:  # no column if no item's kind is known
+                columns.append(f"{item.type:<{kinds}}")
+            if self.show_files and item.named:
+                columns.append(item.file)
+            lines.append("  ".join(columns).rstrip())
+        if self.footnotes:
+            lines += ["", *self.footnotes] if lines else self.footnotes
+        return "\n".join(lines)
+
+    def on_mount(self) -> None:
+        self.query_one("#report").focus()
+
+    def action_toggle_files(self) -> None:
+        self.show_files = not self.show_files
+        self.query_one("#items", Static).update(self.render_items())
 
     def action_close(self) -> None:
         self.dismiss(None)

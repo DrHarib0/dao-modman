@@ -26,6 +26,7 @@ from ..core import (
     itemlists,
     laa,
     launch,
+    moditems,
     pathops,
     presets,
     report,
@@ -43,6 +44,7 @@ from .screens import (
     ConfirmScreen,
     ConflictsScreen,
     GroupScreen,
+    ItemsScreen,
     KeysScreen,
     NexusAddScreen,
     OptionsScreen,
@@ -119,6 +121,7 @@ KEYS = [
     Key("e", "edit_paths", "Paths", "Remove or rename the files a mod installs", "Mod contents"),
     Key("p", "options", "Options", "Choose the variants of an override package", "Mod contents"),
     Key("v", "conflicts", "Conflicts", "Show which mods ship the same files", "Mod contents"),
+    Key("L", "items", "Items", "List the items a mod adds, by their in-game names", "Mod contents"),
     Key("i", "import_file", "Import", "Import a local archive", "Nexus"),
     Key("o", "open_page", "Nexus page", "Open the mod's Nexus page in the browser", "Nexus"),
     Key("c", "check_updates", "Check", "Check Nexus for updates", "Nexus"),
@@ -174,6 +177,7 @@ class ModManApp(App[None]):
         self.config = config
         self.library = Library(config.dirs, config.ignore)
         self.presets = presets.load(config.presets_file)
+        self.game_data = moditems.GameData()  # read on demand, kept for the session
         self.nexus = (
             NexusClient(config.nexus_token, transport=transport) if config.nexus_token else None
         )
@@ -423,6 +427,37 @@ class ModManApp(App[None]):
             self.notify(f"{mod.name} has no options", markup=False)
             return
         self.push_screen(OptionsScreen(self.library, mod), lambda _: self.refresh_table())
+
+    @work
+    async def action_items(self) -> None:
+        """List the items the selected mod adds."""
+        mod = self.current_mod()
+        if not mod:
+            return
+        try:
+            found = await self.run_with_progress(
+                "Reading items",
+                moditems.collect,
+                self.library,
+                mod,
+                self.config.game_install_dir,
+                self.game_data,
+                self.config.language,
+            )
+        except (pathops.PathOpError, MetadataError, OSError) as exc:
+            self.error(exc)
+            return
+        for problem in found.problems[:3]:
+            self.notify(problem, severity="warning", markup=False)
+        if not found.added and not found.replaced:
+            self.notify(f"{mod.name} has no items", markup=False)
+            return
+        notes = []
+        if found.replaced:
+            more = "more " if found.added else ""
+            notes.append(f"{found.replaced} {more}replace items of the game")
+        title = f"{len(found.added)} item(s) added by {mod.name}"
+        self.push_screen(ItemsScreen(title, found.added, notes))
 
     def action_edit_paths(self) -> None:
         mod = self.current_mod()
