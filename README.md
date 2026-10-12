@@ -30,7 +30,8 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
     uv run pytest
     uv run ruff check . && uv run ruff format .
 
-`.rar` archives need `bsdtar`, `7z` or `unrar` on PATH.
+`.rar` archives need `unrar`, `7z` or `bsdtar` on PATH; they are tried in that order, since
+`bsdtar` cannot read solid archives.
 
 ## Keys
 

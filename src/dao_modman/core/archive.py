@@ -64,22 +64,30 @@ def _extract_7z(archive: Path, dest: Path) -> None:
 
 
 def _extract_rar(archive: Path, dest: Path) -> None:
-    # No pure-Python rar reader exists. All three tools refuse to write outside the
-    # target directory by default.
+    """Extract with whichever tool manages: no pure-Python rar reader exists.
+
+    unrar and 7z come first because bsdtar cannot read solid archives, which are common.
+    All three refuse to write outside the target directory by default.
+    """
     commands = {
-        "bsdtar": ["bsdtar", "-xf", str(archive), "-C", str(dest)],
-        "7z": ["7z", "x", "-y", f"-o{dest}", str(archive)],
         "unrar": ["unrar", "x", "-y", "-o+", str(archive), f"{dest}{os.sep}"],
+        "7z": ["7z", "x", "-y", f"-o{dest}", str(archive)],
+        "bsdtar": ["bsdtar", "-xf", str(archive), "-C", str(dest)],
     }
+    failures = []
     for tool, command in commands.items():
         if not shutil.which(tool):
             continue
         result = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL)
-        if result.returncode != 0:
-            detail = (result.stderr or result.stdout).strip()[-500:]
-            raise ArchiveError(f"{tool} failed on {archive.name}: {detail}")
-        return
-    raise ArchiveError("rar archives need one of bsdtar, 7z or unrar on PATH")
+        if result.returncode == 0:
+            return
+        detail = (result.stderr or result.stdout).strip().splitlines()
+        failures.append(f"{tool}: {detail[-1] if detail else 'failed'}")
+        shutil.rmtree(dest)  # whatever the failed tool left behind must not be imported
+        dest.mkdir()
+    if not failures:
+        raise ArchiveError("rar archives need one of unrar, 7z or bsdtar on PATH")
+    raise ArchiveError(f"cannot extract {archive.name} ({'; '.join(failures)})")
 
 
 def _drop_links(dest: Path) -> None:

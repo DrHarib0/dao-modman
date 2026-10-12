@@ -208,3 +208,42 @@ def test_replace_archive_keeps_id_order_and_ops(tmp_path: Path, library: Library
     }
     assert (library.files_dir("v1") / "a.erf").read_text() == "2"
     assert [p.name for p in library.dirs.mods.iterdir() if p.name.startswith(".")] == []
+
+
+def test_rar_falls_back_to_the_next_tool(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """bsdtar cannot read solid rar archives; another tool must get its turn."""
+    archive = tmp_path / "solid.rar"
+    archive.write_bytes(b"Rar!\x1a\x07\x00 pretend")
+    calls: list[str] = []
+    works: set[str] = set()
+
+    def fake_run(command: list[str], **_: object) -> subprocess.CompletedProcess:
+        tool = command[0]
+        calls.append(tool)
+        dest = tmp_path / "out"
+        if tool in works:
+            (dest / "good.erf").write_text(tool)
+            return subprocess.CompletedProcess(command, 0, "", "")
+        (dest / "partial.txt").write_text("half an extraction")
+        return subprocess.CompletedProcess(command, 1, "", f"noise\n{tool} cannot read this")
+
+    monkeypatch.setattr(archives.subprocess, "run", fake_run)
+    monkeypatch.setattr(archives.shutil, "which", lambda tool: f"/usr/bin/{tool}")
+
+    works.add("7z")  # unrar fails, 7z succeeds, bsdtar is never asked
+    archives.extract(archive, tmp_path / "out")
+    assert calls == ["unrar", "7z"]
+    assert archives.list_files(tmp_path / "out") == ["good.erf"]  # no leftovers of the failure
+
+    calls.clear()
+    works.clear()
+    shutil.rmtree(tmp_path / "out")
+    with pytest.raises(archives.ArchiveError) as error:
+        archives.extract(archive, tmp_path / "out")
+    assert calls == ["unrar", "7z", "bsdtar"]
+    message = str(error.value)
+    assert "unrar: unrar cannot read this" in message and "bsdtar: bsdtar cannot read" in message
+
+    monkeypatch.setattr(archives.shutil, "which", lambda tool: None)
+    with pytest.raises(archives.ArchiveError, match="need one of"):
+        archives.extract(archive, tmp_path / "out")
