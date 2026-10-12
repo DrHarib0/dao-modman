@@ -37,6 +37,7 @@ from .screens import (
     PathOpsScreen,
     ProgressScreen,
     TextPromptScreen,
+    TextScreen,
     UnapplyScreen,
 )
 
@@ -110,7 +111,13 @@ KEYS = [
     Key("o", "open_page", "Nexus page", "Open the mod's Nexus page in the browser", "Nexus"),
     Key("c", "check_updates", "Check", "Check Nexus for updates", "Nexus"),
     Key("u", "update", "Update", "Update the mod to its newest file", "Nexus"),
-    Key("t", "tools", "Tools", "Tools: LAA patch, developer console", "Game"),
+    Key(
+        "t",
+        "tools",
+        "Tools",
+        "Tools: LAA patch, developer console, character creator report",
+        "Game",
+    ),
 ]
 SECTIONS = ("Mod list", "Mod contents", "Nexus", "Game", "App")
 
@@ -771,11 +778,29 @@ class ModManApp(App[None]):
         else:
             tools.append(("console_enable", "Enable the developer console"))
 
+        tools.append(("chargen", "Check the character creator list (chargenmorphcfg.xml)"))
+
         def done(tool: str | None) -> None:
-            if tool:
+            if tool == "chargen":
+                self.show_chargen_report()
+            elif tool:
                 self.run_tool(tool)
 
         self.push_screen(ChoiceScreen("Tools", tools), done)
+
+    @work
+    async def show_chargen_report(self) -> None:
+        """Show what the merged character creator list holds, and which entries are broken."""
+
+        def build(progress: deploy.Progress) -> str:
+            return report.chargen_report(self.config.game_install_dir, self.library, progress)[1]
+
+        try:
+            text = await self.run_with_progress("Checking the character creator list", build)
+        except (pathops.PathOpError, OSError, ValueError) as exc:
+            self.error(exc)
+            return
+        self.push_screen(TextScreen("Character creator list", text))
 
     def run_tool(self, tool: str) -> None:
         install_dir = self.config.game_install_dir

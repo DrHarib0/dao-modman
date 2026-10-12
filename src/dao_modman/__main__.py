@@ -163,6 +163,13 @@ def cmd_conflicts(action: str | None, names: list[str], accept_all: bool) -> int
     return 0
 
 
+def cmd_chargen() -> int:
+    config = load_config()
+    result, text = report.chargen_report(config.game_install_dir, _library(config))
+    print(text)
+    return 1 if result and result.dangling else 0
+
+
 def cmd_revisions() -> int:
     data_dir = load_config().dirs.data
     if not revisions.init(data_dir):
@@ -201,10 +208,15 @@ def main(argv: list[str] | None = None) -> int:
         "revisions", help="keep a history of the library's metadata in git (debugging aid)"
     )
     revisions_cmd.add_argument("action", choices=["init"])
+    commands.add_parser(
+        "chargen", help="report on the merged character creator list and its broken entries"
+    )
     args = parser.parse_args(argv)
 
     if args.command == "nxm":
         return cmd_nxm(args.url)
+    if args.command == "chargen":
+        return cmd_chargen()
     if args.command == "revisions":
         return cmd_revisions()
     if args.command == "conflicts":

@@ -87,6 +87,10 @@ ModalScreen {
     color: $text-muted;
 }
 
+#report {
+    height: 1fr;
+}
+
 #option-keys {
     height: auto;
     max-height: 24;

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
+from pathlib import Path
 
+from . import chargen, resources
 from .deploy import ACCEPTED, ERROR, OPEN, Conflict, Plan
 from .library import Library
 from .models import Overwrite
@@ -163,3 +165,29 @@ def format_conflicts(library: Library, plan: Plan) -> str:
         lines += [f"  {unused_line(library, mod_id, rule)}" for mod_id, rule in unused]
         lines.append("")
     return "\n".join(lines).rstrip("\n")
+
+
+def chargen_report(
+    install_dir: Path | None, library: Library, progress: resources.Progress | None = None
+) -> tuple[chargen.Report | None, str]:
+    """What the character creator list of the enabled mods contains, and what in it is broken.
+
+    Returns `(report, text)`; the report is None when no enabled mod ships the file.
+    """
+    sources = [
+        (mod.id, library.files_dir(mod.id) / source)
+        for entry, mod in library.ordered()
+        if entry.enabled
+        for target, source in library.targets(mod).items()
+        if target.rpartition("/")[2].casefold() == chargen.FILE_NAME
+    ]
+    if not sources:
+        return None, f"No enabled mod ships a {chargen.FILE_NAME}."
+    available = resources.collect(install_dir, library, progress)
+    game_file = resources.read_game_file(install_dir, chargen.FILE_NAME)
+    result = chargen.analyse(sources, game_file, available.exists)
+    names = {mod_id: f"#{position} {name}" for mod_id, (position, name) in _labels(library).items()}
+    text = chargen.format_report(result, names)
+    if install_dir is None:
+        text += "\n\nThe game install dir is unknown, so the game's own files were not considered."
+    return result, text

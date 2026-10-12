@@ -87,6 +87,30 @@ class ProgressScreen(ModalScreen[None]):
         self.query_one("#work-detail", Static).update(f"{phase}: {done} / {total}")
 
 
+class TextScreen(ModalScreen[None]):
+    """A report to read: scrollable text with a title."""
+
+    BINDINGS = [Binding("escape,q", "close", "Close")]
+
+    def __init__(self, title: str, text: str) -> None:
+        super().__init__()
+        self.title_text = title
+        self.text = text
+
+    def compose(self) -> ComposeResult:
+        with Vertical(classes="dialog wide tall"):
+            yield Label(self.title_text, classes="title", markup=False)
+            with VerticalScroll(id="report"):
+                yield Static(self.text, markup=False)
+            yield Label("[b]\u2191 \u2193[/] scroll   [b]esc[/] close", classes="hint")
+
+    def on_mount(self) -> None:
+        self.query_one("#report").focus()
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
 class KeysScreen(ModalScreen[None]):
     """Every key of the main screen, by section."""
 

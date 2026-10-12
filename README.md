@@ -23,6 +23,7 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
     uv run dao-modman laa status|patch|restore   # Large Address Aware patch, see below
     uv run dao-modman console status|enable|disable   # developer console, see below
     uv run dao-modman revisions init       # keep a git history of the library's metadata
+    uv run dao-modman chargen              # check the merged character creator list
     uv run dao-modman conflicts            # which mods ship the same files, and who wins
     uv run dao-modman conflicts accept NAME ... | --all   # mark conflicts as intended
 
@@ -52,7 +53,7 @@ The bar at the bottom shows the everyday keys; `?` lists all of them.
 | `a` / `x`        | apply / unapply                          |
 | `l`              | launch the game through Steam            |
 | `h`              | hide / show the game's official DLC      |
-| `t`              | tools (LAA patch, developer console)     |
+| `t`              | tools (LAA, console, creator report)     |
 | `delete`         | remove mod from the library              |
 
 ## Data
@@ -197,6 +198,18 @@ options show `options` in `Notes`, with the number of choices that differ from t
 
 Not supported: creating packages, and DAO-Modmanager's separate `DA_ini_config.xml` system.
 
+### Character creator report
+
+The merge of `chargenmorphcfg.xml` happens on every apply. `dao-modman chargen`, or Tools in
+the TUI, shows what it amounts to without applying anything: which mods contribute, how many
+entries each section holds and who added them, and any file that could not be read. The game's
+own entries are told apart by reading the unmodded file from the game's archives.
+
+It also lists entries that **point at nothing**: a hairstyle, colour or head named in a mod's
+list for which neither the game's archives nor any enabled mod has a file. Those are the
+broken choices in the character creator, typically a typo in a mod or a mod that was switched
+off while another still lists its content. The command exits with status 1 when it finds any.
+
 ### Conflict report
 
 `v` in the TUI, or `dao-modman conflicts`, lists every contested file grouped by the mods that
@@ -309,7 +322,9 @@ automatically (a rename operation in its `mod.toml`).
         terminal.py    # find a terminal emulator to open a new instance in
         install.py     # download + import, in-place updates, MD5 lookup
         addins.py      # Settings/AddIns.xml
-        chargen.py     # chargenmorphcfg.xml merging
+        chargen.py     # chargenmorphcfg.xml merging and its report
+        erf.py         # reader for the game's ERF archives
+        resources.py   # which resources the game and the enabled mods provide
         deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply, clean
         revisions.py   # git history of the library's metadata
         report.py      # conflict report

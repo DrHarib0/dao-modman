@@ -225,13 +225,13 @@ async def test_tools_menu_laa_patch_and_restore(
     app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 3
+        assert app.screen.query_one(OptionList).option_count == 4
         await pilot.press("enter")  # first entry: apply the patch
         await pilot.pause()
         assert laa.is_laa(exe)
 
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 2  # the patch entry is gone
+        assert app.screen.query_one(OptionList).option_count == 3  # the patch entry is gone
         await pilot.press("enter")
         await pilot.pause()
         assert not laa.is_laa(exe)
@@ -309,7 +309,7 @@ async def test_tools_menu_enable_console(tmp_path: Path, dirs: Dirs, user_dir: P
     app.open_url = lambda url, **_: opened.append(url)
 
     async def run_last_tool(pilot) -> None:
-        await pilot.press("t", "end", "enter")  # the console entry is the last one
+        await pilot.press("t", "end", "up", "enter")  # the console entry, above the report
         await pilot.pause()
 
     async with app.run_test(size=(140, 40)) as pilot:
@@ -1039,3 +1039,22 @@ async def test_footer_fits_and_question_mark_lists_every_key(
         assert not isinstance(app.screen, KeysScreen)
         await pilot.press("question_mark", "question_mark")  # ? closes it as well
         assert not isinstance(app.screen, KeysScreen)
+
+
+async def test_tools_menu_shows_the_character_creator_report(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    from dao_modman.tui.screens import TextScreen
+
+    cfg = '<morph_config><hairs><resource name="{}" /></hairs></morph_config>'
+    Library(dirs).import_archive(
+        make_zip(tmp_path / "Hairs.zip", {"chargenmorphcfg.xml": cfg.format("hm_har_x_0")})
+    )
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("t", "end", "enter")  # the report is the last tool
+        await until(pilot, lambda: isinstance(app.screen, TextScreen))
+        text = app.screen.text
+        assert "#1 Hairs" in text and "hairs: hm_har_x_0" in text
+        await pilot.press("escape")
+        assert not isinstance(app.screen, TextScreen)
