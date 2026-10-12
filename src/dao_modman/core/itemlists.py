@@ -18,6 +18,8 @@ GAME_TABLE = "itlst_biow.gda"
 MOD_TABLE = "itlst_user.gda"
 ITEM_SUFFIX = ".uti"
 GAME_DIRS = ("addins", "modules", "packages")  # what the scanner reads, in its order
+EXTRA_DIR = "offers"  # not read by the scanner
+EXTRA_DIR = "offers"  # not read by the scanner
 _OVERRIDE = "packages/core/override/"
 _FIRST_ROW = "INVALID"
 _HEADER = b"GFF V4.0PC  G2DAV0.2"
@@ -90,27 +92,37 @@ def _items_in(archive: Path) -> list[str] | None:
 
 
 def game_items(install_dir: Path, progress: deploy.Progress | None = None) -> list[str]:
-    """The game's item files, selected and ordered like the scanner does.
+    """The game's item files: the scanner's list, then what the scanner misses.
 
-    Encrypted DLC archives are left out, as the scanner cannot open them, and an item that
-    several archives contain is listed once for each.
+    The first part is selected and ordered like the scanner does, an item that several
+    archives contain being listed once for each. The scanner cannot open the encrypted DLC
+    archives and does not look at the offers; their items follow, each name once.
     """
     archives = []
-    for name in GAME_DIRS:
+    for name in (*GAME_DIRS, EXTRA_DIR):
         top = resolve_case(install_dir, name)
         if top.is_dir():
             found = [path for path in top.rglob("*") if path.suffix.casefold() == ".erf"]
-            archives += sorted(found, key=lambda path: path.as_posix().casefold())
-    names = []
-    for index, path in enumerate(archives):
+            found.sort(key=lambda path: path.as_posix().casefold())
+            archives += [(path, name == EXTRA_DIR) for path in found]
+    names, extra = [], []
+    for index, (path, skipped) in enumerate(archives):
         try:
             archive = erf.open_archive(path)
-            if archive.readable:
-                names += [entry.name for entry in archive.entries if _is_item(entry.name)]
+            items = [entry.name for entry in archive.entries if _is_item(entry.name)]
+            if skipped or not archive.readable:
+                extra += items
+            else:
+                names += items
         except erf.ErfError:
             pass
         if progress:
             progress("Reading game items", index + 1, len(archives))
+    listed = {name.casefold() for name in names}
+    for name in extra:
+        if name.casefold() not in listed:
+            listed.add(name.casefold())
+            names.append(name)
     return names
 
 

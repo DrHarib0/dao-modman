@@ -48,15 +48,23 @@ def test_game_items_follow_the_scanner(tmp_path: Path) -> None:
     make_erf(install / "Offers/dao_prc_ocp_13/module/data/designeritems.erf", {"offer.uti": b""})
     (install / "packages/core/data/broken.erf").write_bytes(b"nothing like an archive here")
     locked = make_erf(install / "Addins/dao_prc_cp_1/core/data/designeritems.erf", {"dlc.uti": b""})
-    # an ERF V2.2 header with the encryption flag: names readable, the scanner skips it
+    # ERF V2.2 with the encryption flag: only names are readable. One is already listed.
     head = "ERF V2.2".encode("utf-16-le") + (1).to_bytes(4, "little") + bytes(12)
-    locked.write_bytes(head + (0x10).to_bytes(4, "little") + bytes(20) + bytes(76))
+    toc = b"".join(name.encode("utf-16-le").ljust(76, b"\0") for name in ("dlc.uti", "B.UTI"))
+    locked.write_bytes(
+        head.replace((1).to_bytes(4, "little"), (2).to_bytes(4, "little"), 1)
+        + (0x10).to_bytes(4, "little")
+        + bytes(20)
+        + toc
+    )
+    make_erf(install / "Offers/dao_prc_ocp_14/module/data/designeritems.erf", {"OFFER.uti": b""})
 
     seen: list[tuple[int, int]] = []
     names = itemlists.game_items(install, lambda _phase, done, total: seen.append((done, total)))
-    # addins, modules, packages; an item in two archives is listed twice
-    assert names == ["z.uti", "m.uti", "b.uti", "b.uti", "c.UTI"]
-    assert seen[-1] == (6, 6)
+    # addins, modules, packages; an item in two archives is listed twice. Then what the
+    # scanner cannot see, once each: the encrypted archive's items and the offers
+    assert names == ["z.uti", "m.uti", "b.uti", "b.uti", "c.UTI", "dlc.uti", "offer.uti"]
+    assert seen[-1] == (8, 8)  # every archive is reported, the broken one too
 
 
 def enabled(library: Library, tmp_path: Path, name: str, files: dict[str, str | bytes]):

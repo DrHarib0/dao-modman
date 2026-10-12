@@ -150,8 +150,9 @@ the same mod and file. Problems in that file are reported at startup and it is t
 and `itlst_user.gda` (those of mods). The mod ships a Windows scanner to fill them, to be
 run again after every change. That is not needed here: when the mod is enabled, every apply
 writes both tables itself, from the game's archives and from the mod files being deployed
-(plus item files installed by hand). The game table is the same, byte for byte, as the
-scanner's; like the scanner it leaves out the encrypted DLC archives.
+(plus item files installed by hand). The game table starts with exactly the scanner's rows;
+the items of the encrypted DLC archives and of the offers, which the scanner cannot see,
+follow.
 
 ## Ignored files
 
