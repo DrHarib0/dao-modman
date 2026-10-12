@@ -369,7 +369,6 @@ class ModManApp(App[None]):
             box.display = False
 
     def refresh_status(self) -> None:
-        game = str(self.config.game_user_dir or "game user dir not found (set it in config.toml)")
         if self.nexus is None:
             account = "no API token"
         elif self.account is None:
@@ -378,7 +377,9 @@ class ModManApp(App[None]):
             kind = "premium" if self.account.get("is_premium") else "free"
             account = f"{self.account.get('name', '?')} ({kind})"
         deployed = "yes" if self.config.dirs.deployed_file.exists() else "no"
-        status = f"Game: {game}  |  Nexus: {account}  |  Applied: {deployed}"
+        status = f"Nexus: {account}  |  Applied: {deployed}"
+        if not self.config.game_user_dir:  # worth a place only while it is a problem
+            status = f"Game user dir not found (set it in config.toml)  |  {status}"
         if self.filter_text:
             shown = sum(mod_id is not None for mod_id in self._row_ids)
             status = (
