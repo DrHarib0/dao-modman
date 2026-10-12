@@ -23,6 +23,7 @@ from ..core import (
     console,
     deploy,
     ipc,
+    itemlists,
     laa,
     launch,
     pathops,
@@ -680,10 +681,15 @@ class ModManApp(App[None]):
 
     @work
     async def run_apply(self, plan: deploy.Plan, user_dir: Path) -> None:
+        deployed_file = self.config.dirs.deployed_file
+        install_dir = self.config.game_install_dir
+
+        def apply(progress: deploy.Progress) -> tuple[deploy.ApplyResult, str | None]:
+            note = itemlists.fill(plan, install_dir, user_dir, deployed_file, progress)
+            return deploy.apply(plan, user_dir, deployed_file, progress), note
+
         try:
-            result = await self.run_with_progress(
-                "Applying mods", deploy.apply, plan, user_dir, self.config.dirs.deployed_file
-            )
+            result, note = await self.run_with_progress("Applying mods", apply)
         except (deploy.DeployError, OSError, ValueError) as exc:
             self.error(exc)
             return
@@ -694,6 +700,8 @@ class ModManApp(App[None]):
         if result.skipped:
             message += f", left {len(result.skipped)} existing file(s) untouched"
         self.notify(message)
+        if note:
+            self.notify(note, markup=False)
 
     def action_unapply(self) -> None:
         self.start_unapply()

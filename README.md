@@ -143,6 +143,16 @@ differs from library to library. A `presets.toml` of the same format in
 `~/.config/dao-modman/` adds your own entries; an entry there replaces the shipped one for
 the same mod and file. Problems in that file are reported at startup and it is then ignored.
 
+### Item tables of "Add Any Item Visual Deluxe"
+
+[Nexus mod 1825](https://www.nexusmods.com/dragonage/mods/1825) adds the console scripts
+`get` and `getx`, which read two tables of item files, `itlst_biow.gda` (the game's items)
+and `itlst_user.gda` (those of mods). The mod ships a Windows scanner to fill them, to be
+run again after every change. That is not needed here: when the mod is enabled, every apply
+writes both tables itself, from the game's archives and from the mod files being deployed
+(plus item files installed by hand). The game table is the same, byte for byte, as the
+scanner's; like the scanner it leaves out the encrypted DLC archives.
+
 ## Ignored files
 
 The game only loads its own resource types. Readmes, pictures, links and similar files that
@@ -350,6 +360,7 @@ is installed through dao-modman, it offers the predefined path operation that ro
         install.py     # download + import, in-place updates, MD5 lookup
         addins.py      # Settings/AddIns.xml
         chargen.py     # chargenmorphcfg.xml merging and its report
+        itemlists.py   # item tables for the Add Any Item mod, written at apply
         erf.py         # reader for the game's ERF archives
         resources.py   # which resources the game and the enabled mods provide
         deploy.py      # plan (ops, priority, conflicts, merges), apply, unapply, clean

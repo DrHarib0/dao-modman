@@ -476,6 +476,16 @@ def _mod_dir_entries(user_dir: Path, protected: set[str]) -> list[tuple[str, Pat
     return sorted(found)
 
 
+def unmanaged(
+    user_dir: Path, deployed_file: Path, install_dir: Path | None = None
+) -> list[tuple[str, Path]]:
+    """Files in the mod directories that the deployment record does not list."""
+    record = load_record(deployed_file) or {}
+    applied = {item["path"].casefold() for item in record.get("files", [])}
+    entries = _mod_dir_entries(user_dir, _official_dirs(user_dir, install_dir))
+    return [(rel, path) for rel, path in entries if rel.casefold() not in applied]
+
+
 def scan(
     user_dir: Path,
     deployed_file: Path,
