@@ -514,17 +514,26 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         Binding("r,delete", "remove", "Remove"),
         Binding("m", "rename", "Rename/move"),
         Binding("u", "undo", "Undo last"),
+        Binding("p", "preset", "Predefined operations"),
         Binding("c", "toggle_all", "Collapse/expand all"),
         Binding("slash", "filter", "Filter"),
         Binding("s", "save", "Save"),
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, mod: Mod, base: dict[str, str]) -> None:
+    def __init__(
+        self,
+        mod: Mod,
+        base: dict[str, str],
+        preset_ops: list[PathOp] | None = None,
+        preset_note: str = "",
+    ) -> None:
         super().__init__()
         self.mod = mod
         self.base = base
         self.ops = list(mod.ops)
+        self.preset_ops = preset_ops or []  # predefined operations the mod does not have yet
+        self.preset_note = preset_note
         self.filter = ""
         self.collapsed: set[str] = set()  # folders the user folded, kept across rebuilds
 
@@ -533,6 +542,7 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
             yield Label(f"Paths of {self.mod.name}", classes="title", markup=False)
             yield PathTree("Dragon Age/", id="targets")
             yield Input(placeholder="filter by part of a file or folder name", id="filter")
+            yield Static("", id="preset", markup=False)
             yield Static("", id="ops", markup=False)
             yield Label(
                 "[b]r[/] remove   [b]m[/] rename/move   [b]u[/] undo last   [b]/[/] filter   "
@@ -596,6 +606,7 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
             tree.move_cursor(nodes[selected])
         lines = [f"{i}. {op.describe()}" for i, op in enumerate(self.ops, 1)]
         self.query_one("#ops", Static).update("\n".join(lines) or "No operations.")
+        self._show_preset()
 
     def action_toggle_all(self) -> None:
         tree = self.query_one("#targets", PathTree)
@@ -648,6 +659,21 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
                 self._add(PathOp(OP_RENAME, path, new_path))
 
         self.app.push_screen(TextPromptScreen("Rename / move to", path), done)
+
+    def _show_preset(self) -> None:
+        """Point out predefined operations that are not among the mod's operations yet."""
+        missing = [op for op in self.preset_ops if op not in self.ops]
+        hint = self.query_one("#preset", Static)
+        hint.display = bool(missing)
+        if missing:
+            count = f"{len(missing)} predefined operation{'' if len(missing) == 1 else 's'}"
+            hint.update(f"{count} not applied, p adds: {self.preset_note}".rstrip(": "))
+
+    def action_preset(self) -> None:
+        missing = [op for op in self.preset_ops if op not in self.ops]
+        if missing:
+            self.ops += missing
+            self.rebuild()
 
     def action_undo(self) -> None:
         if self.ops:

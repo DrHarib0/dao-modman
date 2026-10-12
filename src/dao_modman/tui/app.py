@@ -18,7 +18,18 @@ from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
 from textual.widgets import DataTable, Footer, Header, Label, ProgressBar, Static
 
-from ..core import addins, console, deploy, ipc, laa, launch, pathops, report, revisions
+from ..core import (
+    addins,
+    console,
+    deploy,
+    ipc,
+    laa,
+    launch,
+    pathops,
+    presets,
+    report,
+    revisions,
+)
 from ..core.config import Config
 from ..core.dazip import AddIn
 from ..core.install import install_from_nexus, link_to_nexus
@@ -161,6 +172,7 @@ class ModManApp(App[None]):
         super().__init__()
         self.config = config
         self.library = Library(config.dirs, config.ignore)
+        self.presets = presets.load(config.presets_file)
         self.nexus = (
             NexusClient(config.nexus_token, transport=transport) if config.nexus_token else None
         )
@@ -186,7 +198,7 @@ class ModManApp(App[None]):
         self.query_one("#mods", DataTable).add_columns(*COLUMNS)
         self.query_one("#downloads").display = False
         self.refresh_table()
-        for error in self.library.errors:
+        for error in [*self.library.errors, *self.presets.problems]:
             self.notify(error, severity="error", timeout=15, markup=False)
         try:
             if deploy.rollback(self.config.dirs.deployed_file):
@@ -422,7 +434,16 @@ class ModManApp(App[None]):
                 self.library.save_mod(mod, f"{mod.id}: edit path operations ({len(ops)})")
                 self.refresh_table()
 
-        self.push_screen(PathOpsScreen(mod, self.library.default_targets(mod)), done)
+        preset = self.presets.find(mod)
+        self.push_screen(
+            PathOpsScreen(
+                mod,
+                self.library.default_targets(mod),
+                presets.pending(mod, preset),
+                preset.description if preset else "",
+            ),
+            done,
+        )
 
     def action_remove(self) -> None:
         mod = self.current_mod()
@@ -457,6 +478,7 @@ class ModManApp(App[None]):
         linked = self.nexus is not None and await link_to_nexus(self.nexus, self.library, mod)
         self.refresh_table(select=mod.id)
         self.notify(f"Imported {mod.name}" + (" (found on Nexus)" if linked else ""), markup=False)
+        await self.suggest_preset(mod)
 
     # -- nexus ------------------------------------------------------------
 
@@ -529,6 +551,17 @@ class ModManApp(App[None]):
         self.updates.discard(mod.id)
         self.refresh_table(select=mod.id)
         self.notify(f"{'Updated' if updated else 'Installed'} {mod.name}", markup=False)
+        await self.suggest_preset(mod)
+
+    async def suggest_preset(self, mod: Mod) -> None:
+        """Offer the predefined path operations for a mod that was just imported."""
+        preset = self.presets.find(mod)
+        if preset is None or not presets.pending(mod, preset):
+            return
+        message = presets.describe(mod, preset) + "\n\nApply them?"
+        if await self.push_screen_wait(ConfirmScreen(message)):
+            presets.apply(self.library, mod, preset)
+            self.refresh_table(select=mod.id)
 
     @work(exclusive=True, group="updates")
     async def action_check_updates(self) -> None:

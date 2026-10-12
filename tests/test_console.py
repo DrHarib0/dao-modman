@@ -8,7 +8,7 @@ from dao_modman import __main__ as cli
 from dao_modman.core import console
 from dao_modman.core.config import Config
 from dao_modman.core.library import Library
-from dao_modman.core.models import NexusInfo, PathOp
+from dao_modman.core.models import NexusInfo
 from dao_modman.core.paths import Dirs
 
 from .conftest import make_zip
@@ -98,23 +98,15 @@ def test_ensure_key(tmp_path: Path, user_dir: Path) -> None:
     assert "key bindings" in console.key_label(None)
 
 
-def test_fonts_installed_and_placement(tmp_path: Path, user_dir: Path, library: Library) -> None:
+def test_fonts_installed(tmp_path: Path, user_dir: Path, library: Library) -> None:
     assert not console.fonts_installed(user_dir, library)
     assert not console.fonts_installed(None, library)
 
-    other = library.import_archive(make_zip(tmp_path / "other.zip", {"fonts.erf": "x"}))
-    assert not console.place_fonts(library, other)  # not the fonts mod: left alone
-
     mod = library.import_archive(
-        make_zip(tmp_path / "fix.zip", {"Angel/Fonts.erf": "erf", "readme.txt": "r"}),
+        make_zip(tmp_path / "fix.zip", {"fonts.erf": "erf", "readme.txt": "r"}),
         nexus=NexusInfo("dragonage", console.FONTS_MOD_ID, 5571),
     )
     assert console.fonts_installed(user_dir, library)
-    assert console.place_fonts(library, mod)
-    assert mod.ops == [
-        PathOp("rename", "packages/core/override/fix/Angel/Fonts.erf", console.FONTS_REL)
-    ]
-    assert console.FONTS_REL in Library(library.dirs).targets(mod)
 
     library.remove(mod.id)
     assert not console.fonts_installed(user_dir, library)

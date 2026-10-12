@@ -106,6 +106,11 @@ ModalScreen {
     margin-top: 1;
 }
 
+#preset {
+    margin-top: 1;
+    color: $warning;
+}
+
 #ops {
     height: auto;
     max-height: 8;

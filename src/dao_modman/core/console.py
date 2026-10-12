@@ -14,7 +14,6 @@ from pathlib import Path
 
 from .library import Library
 from .metadata import write_atomic
-from .models import OP_RENAME, Mod, PathOp
 from .paths import resolve_case
 
 LAUNCHER_REL = "data/DAOriginsLauncher.xml"
@@ -125,15 +124,3 @@ def fonts_installed(user_dir: Path | None, library: Library) -> bool:
     if any(mod.nexus and mod.nexus.mod_id == FONTS_MOD_ID for mod in library.mods.values()):
         return True
     return user_dir is not None and resolve_case(user_dir, FONTS_REL).is_file()
-
-
-def place_fonts(library: Library, mod: Mod) -> bool:
-    """Route the fonts mod's fonts.erf to `packages/core/data/`, where the game needs it."""
-    if not mod.nexus or mod.nexus.mod_id != FONTS_MOD_ID:
-        return False
-    for target in library.targets(mod):
-        if target.casefold().endswith("/fonts.erf") and target.casefold() != FONTS_REL:
-            mod.ops.append(PathOp(OP_RENAME, target, FONTS_REL))
-            library.save_mod(mod, f"{mod.id}: route fonts.erf to {FONTS_REL}")
-            return True
-    return False

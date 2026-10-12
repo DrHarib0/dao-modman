@@ -1058,3 +1058,84 @@ async def test_tools_menu_shows_the_character_creator_report(
         assert "#1 Hairs" in text and "hairs: hm_har_x_0" in text
         await pilot.press("escape")
         assert not isinstance(app.screen, TextScreen)
+
+
+async def test_installing_a_known_mod_offers_its_predefined_operations(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    payload = make_zip(tmp_path / "payload.zip", {"fonts.erf": "f", "readme.txt": "r"}).read_bytes()
+    files = [
+        {"file_id": 5571, "file_name": "fix.zip", "name": "Fix", "category_name": "MAIN"},
+        {"file_id": 9999, "file_name": "other.zip", "name": "Other", "category_name": "OPTIONAL"},
+    ]
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if request.url.host == "cdn.example":
+            return httpx2.Response(200, content=payload)
+        if path.endswith("/users/validate.json"):
+            return httpx2.Response(200, json={"name": "seb", "is_premium": True})
+        if path.endswith("/mods/1110.json"):
+            return httpx2.Response(200, json={"mod_id": 1110, "name": "Console Fonts"})
+        if path.endswith("/mods/1110/files.json"):
+            return httpx2.Response(200, json={"files": files, "file_updates": []})
+        if path.endswith("/download_link.json"):
+            return httpx2.Response(200, json=[{"URI": f"https://cdn.example{path}.zip"}])
+        return httpx2.Response(404, json={"message": "nope"})
+
+    config = Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret")
+    app = ModManApp(config, transport=httpx2.MockTransport(handler))
+    wanted = PathOp("rename", f"{OVERRIDE}/console-fonts/fonts.erf", "packages/core/data/fonts.erf")
+    async with app.run_test(size=(140, 40)) as pilot:
+        await app.workers.wait_for_complete()
+
+        app.install(1110, 5571)  # a file with a preset: asked, declined
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        text = app.screen.message
+        assert "Predefined path operations exist for Console Fonts" in text
+        assert "only reads fonts.erf from packages/core/data" in text and wanted.describe() in text
+        await pilot.press("n")
+        await app.workers.wait_for_complete()
+        assert app.library.mods["console-fonts"].ops == []
+
+        # catching up in the path editor
+        await pilot.press("e")
+        screen = app.screen
+        hint = str(screen.query_one("#preset", Static).render())
+        assert hint.startswith("1 predefined operation not applied, p adds: The game only reads")
+        await pilot.press("p")
+        assert screen.ops == [wanted] and not screen.query_one("#preset").display
+        await pilot.press("p")  # nothing left to add
+        assert screen.ops == [wanted]
+        await pilot.press("u")  # and it can be undone like any other operation
+        assert screen.ops == [] and screen.query_one("#preset").display
+        await pilot.press("p", "s")
+        await pilot.pause()
+        assert app.library.mods["console-fonts"].ops == [wanted]
+
+        app.install(1110, 9999)  # another file of the same mod has no preset: no question
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmScreen)
+
+    # accepted at install: the operations are saved with the mod
+    for mod_dir in list(dirs.mods.iterdir()):
+        Library(dirs).remove(mod_dir.name)
+    app = ModManApp(config, transport=httpx2.MockTransport(handler))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        app.install(1110, 5571)
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        assert rows(app)[0][7] == "1"  # the Ops column
+    assert Library(dirs).mods["console-fonts"].ops == [wanted]
+
+
+async def test_broken_user_presets_are_reported(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    user_file = tmp_path / "presets.toml"
+    user_file.write_text("not toml [")
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, presets_file=user_file))
+    async with app.run_test(size=(140, 40)):
+        assert any(str(user_file) in n.message for n in app._notifications)
+        assert (1825, 9280) in app.presets.by_file
