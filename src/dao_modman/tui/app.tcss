@@ -57,6 +57,12 @@ ModalScreen {
     margin-bottom: 1;
 }
 
+.dialog .section {
+    text-style: bold;
+    color: $accent;
+    margin-top: 1;
+}
+
 .dialog .hint {
     color: $text-muted;
     margin-top: 1;

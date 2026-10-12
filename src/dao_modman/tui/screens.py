@@ -6,7 +6,7 @@ from rich.markup import escape
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
-from textual.containers import Vertical
+from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Input, Label, OptionList, ProgressBar, Static, Tree
 from textual.widgets.option_list import Option
@@ -85,6 +85,29 @@ class ProgressScreen(ModalScreen[None]):
     def advance(self, phase: str, done: int, total: int) -> None:
         self.query_one("#work-progress", ProgressBar).update(total=total, progress=done)
         self.query_one("#work-detail", Static).update(f"{phase}: {done} / {total}")
+
+
+class KeysScreen(ModalScreen[None]):
+    """Every key of the main screen, by section."""
+
+    BINDINGS = [Binding("escape,question_mark,q", "close", "Close")]
+
+    def __init__(self, sections: list[tuple[str, list[tuple[str, str]]]]) -> None:
+        super().__init__()
+        self.sections = sections
+
+    def compose(self) -> ComposeResult:
+        width = max(len(key) for _section, keys in self.sections for key, _help in keys)
+        with VerticalScroll(classes="dialog"):
+            yield Label("Keys", classes="title")
+            for section, keys in self.sections:
+                lines = "\n".join(f"  {key:<{width}}   {text}" for key, text in keys)
+                yield Label(section, classes="section", markup=False)
+                yield Static(lines, markup=False)
+            yield Label("[b]esc[/] close", classes="hint")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
 
 
 class TextPromptScreen(ModalScreen[str | None]):

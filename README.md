@@ -33,6 +33,8 @@ The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`
 
 ## Keys
 
+The bar at the bottom shows the everyday keys; `?` lists all of them.
+
 | Key              | Action                                   |
 | ---------------- | ---------------------------------------- |
 | `space`          | enable / disable mod                     |

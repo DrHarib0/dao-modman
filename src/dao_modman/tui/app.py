@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TypeVar
 
@@ -30,6 +31,7 @@ from .screens import (
     ConfirmScreen,
     ConflictsScreen,
     GroupScreen,
+    KeysScreen,
     NexusAddScreen,
     OptionsScreen,
     PathOpsScreen,
@@ -63,30 +65,83 @@ class DownloadRow(Horizontal):
         self.query_one(ProgressBar).update(total=total, progress=done)
 
 
+@dataclass(frozen=True)
+class Key:
+    """One command of the main screen: its binding, and how it is presented."""
+
+    keys: str  # as for textual's Binding; the first key is the one shown
+    action: str
+    label: str  # short, for the footer
+    help: str  # one line, for the key overview
+    section: str
+    footer: bool = False  # the footer only has room for the everyday keys
+    display: str | None = None  # how to show the key, if not by its name
+    footer_display: str | None = None  # in the footer, when one entry stands for two keys
+
+
+# Both the footer and the key overview (`?`) are built from this table. Footer entries
+# appear in this order; together they must fit an 80 column terminal.
+KEYS = [
+    Key("space", "toggle", "On/off", "Switch the mod on or off", "Mod list", footer=True),
+    Key(
+        "K,ctrl+up",
+        "move(-1)",
+        "Move",
+        "Move the mod up (lower priority)",
+        "Mod list",
+        footer=True,
+        footer_display="K/J",  # one footer entry for both directions
+    ),
+    Key("J,ctrl+down", "move(1)", "Down", "Move the mod down (higher priority)", "Mod list"),
+    Key("n", "add_nexus", "Nexus", "Add a mod from Nexus (URL, id or nxm:// link)", "Nexus", True),
+    Key("a", "apply", "Apply", "Apply the enabled mods to the game", "Game", footer=True),
+    Key("x", "unapply", "Unapply", "Remove the applied mods from the game", "Game", footer=True),
+    Key("l", "launch", "Launch", "Launch the game through Steam", "Game", footer=True),
+    Key("question_mark", "keys", "Keys", "Show this overview", "App", footer=True, display="?"),
+    Key("q", "quit", "Quit", "Quit", "App", footer=True),
+    Key("r", "rename", "Rename", "Rename the mod", "Mod list"),
+    Key("g", "group", "Group", "Assign the mod to a group", "Mod list"),
+    Key("delete", "remove", "Remove", "Remove the mod from the library", "Mod list"),
+    Key("h", "toggle_official", "DLC", "Hide or show the game's official DLC", "Mod list"),
+    Key("e", "edit_paths", "Paths", "Remove or rename the files a mod installs", "Mod contents"),
+    Key("p", "options", "Options", "Choose the variants of an override package", "Mod contents"),
+    Key("v", "conflicts", "Conflicts", "Show which mods ship the same files", "Mod contents"),
+    Key("i", "import_file", "Import", "Import a local archive", "Nexus"),
+    Key("o", "open_page", "Nexus page", "Open the mod's Nexus page in the browser", "Nexus"),
+    Key("c", "check_updates", "Check", "Check Nexus for updates", "Nexus"),
+    Key("u", "update", "Update", "Update the mod to its newest file", "Nexus"),
+    Key("t", "tools", "Tools", "Tools: LAA patch, developer console", "Game"),
+]
+SECTIONS = ("Mod list", "Mod contents", "Nexus", "Game", "App")
+
+
+def key_overview() -> list[tuple[str, list[tuple[str, str]]]]:
+    """The commands by section, as `(key as shown, description)` pairs."""
+    return [
+        (
+            section,
+            [
+                (key.display or key.keys.partition(",")[0], key.help)
+                for key in KEYS
+                if key.section == section
+            ],
+        )
+        for section in SECTIONS
+    ]
+
+
 class ModManApp(App[None]):
     TITLE = "dao-modman"
     CSS_PATH = "app.tcss"
     BINDINGS = [
-        Binding("space", "toggle", "On/off"),
-        Binding("K,ctrl+up", "move(-1)", "Up"),
-        Binding("J,ctrl+down", "move(1)", "Down"),
-        Binding("r", "rename", "Rename"),
-        Binding("g", "group", "Group"),
-        Binding("p", "options", "Options"),
-        Binding("n", "add_nexus", "Nexus"),
-        Binding("i", "import_file", "Import"),
-        Binding("e", "edit_paths", "Paths"),
-        Binding("o", "open_page", "Nexus page"),
-        Binding("c", "check_updates", "Check"),
-        Binding("u", "update", "Update"),
-        Binding("v", "conflicts", "Conflicts"),
-        Binding("a", "apply", "Apply"),
-        Binding("x", "unapply", "Unapply"),
-        Binding("l", "launch", "Launch"),
-        Binding("h", "toggle_official", "DLC"),
-        Binding("t", "tools", "Tools"),
-        Binding("delete", "remove", "Remove"),
-        Binding("q", "quit", "Quit"),
+        Binding(
+            key.keys,
+            key.action,
+            key.label,
+            show=key.footer,
+            key_display=key.footer_display or key.display,
+        )
+        for key in KEYS
     ]
 
     def __init__(
@@ -118,7 +173,7 @@ class ModManApp(App[None]):
         yield DataTable(id="mods", cursor_type="row", zebra_stripes=True)
         yield Vertical(id="downloads")
         yield Static("", id="status", markup=False)
-        yield Footer()
+        yield Footer(show_command_palette=False)
 
     async def on_mount(self) -> None:
         self.query_one("#mods", DataTable).add_columns(*COLUMNS)
@@ -678,6 +733,10 @@ class ModManApp(App[None]):
         elif result.kept:
             message += f", kept {len(result.kept)} modified file(s)"
         self.notify(message)
+
+    def action_keys(self) -> None:
+        """Show every key; the footer only lists the everyday ones."""
+        self.push_screen(KeysScreen(key_overview()))
 
     def action_launch(self) -> None:
         """Start the game through Steam."""

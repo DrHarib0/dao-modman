@@ -983,3 +983,59 @@ async def test_unapply_offers_to_clean_the_mod_directories(
 
         await apply(pilot, app)  # and a fresh apply is complete again
         assert files() == [f"{OVERRIDE}/one/a.erf", f"{OVERRIDE}/one/b.erf"]
+
+
+async def test_footer_fits_and_question_mark_lists_every_key(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    from textual.widgets import Footer
+
+    from dao_modman.tui.app import KEYS
+    from dao_modman.tui.screens import KeysScreen
+
+    Library(dirs).import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1"}))
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(80, 30)) as pilot:
+        footer = app.query_one(Footer)
+        await until(pilot, lambda: len(footer.query("FooterKey")) > 0)
+        await pilot.pause()
+        right_edge = max(child.region.x + child.region.width for child in footer.children)
+        assert right_edge <= footer.region.width == 80  # nothing is cut off
+        shown = " ".join(str(key.render()) for key in footer.query("FooterKey"))
+        assert shown.split() == (
+            [
+                "space",
+                "On/off",
+                "K/J",
+                "Move",
+                "n",
+                "Nexus",
+                "a",
+                "Apply",
+                "x",
+                "Unapply",
+                "l",
+                "Launch",
+                "?",
+                "Keys",
+                "q",
+                "Quit",
+            ]
+        )
+        assert "Rename" not in shown and "palette" not in shown
+
+        await pilot.press("g")  # a key that is no longer in the footer still works
+        assert isinstance(app.screen, GroupScreen)
+        await pilot.press("escape")
+
+        await pilot.press("question_mark")
+        assert isinstance(app.screen, KeysScreen)
+        text = "\n".join(str(widget.render()) for widget in app.screen.query(Static))
+        for key in KEYS:  # every command is listed, whether or not the footer has it
+            assert key.help in text, key.help
+        sections = [str(label.render()) for label in app.screen.query(".section")]
+        assert sections == ["Mod list", "Mod contents", "Nexus", "Game", "App"]
+        await pilot.press("escape")
+        assert not isinstance(app.screen, KeysScreen)
+        await pilot.press("question_mark", "question_mark")  # ? closes it as well
+        assert not isinstance(app.screen, KeysScreen)
