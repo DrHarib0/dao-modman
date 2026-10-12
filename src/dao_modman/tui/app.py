@@ -12,11 +12,11 @@ from typing import TypeVar
 
 import httpx2
 from rich.text import Text
-from textual import work
+from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
-from textual.widgets import DataTable, Footer, Header, Label, ProgressBar, Static
+from textual.widgets import DataTable, Footer, Header, Input, Label, ProgressBar, Static
 
 from ..core import (
     addins,
@@ -118,6 +118,8 @@ KEYS = [
     Key("g", "group", "Group", "Assign the mod to a group", "Mod list"),
     Key("delete", "remove", "Remove", "Remove the mod from the library", "Mod list"),
     Key("h", "toggle_official", "DLC", "Hide or show the game's official DLC", "Mod list"),
+    Key("slash", "filter", "Filter", "Filter the list by name or group", "Mod list", display="/"),
+    Key("escape", "clear_filter", "Unfilter", "Clear the filter", "Mod list", display="esc"),
     Key("e", "edit_paths", "Paths", "Remove or rename the files a mod installs", "Mod contents"),
     Key("p", "options", "Options", "Choose the variants of an override package", "Mod contents"),
     Key("v", "conflicts", "Conflicts", "Show which mods ship the same files", "Mod contents"),
@@ -183,7 +185,8 @@ class ModManApp(App[None]):
         )
         self.account: dict | None = None
         self.updates: set[str] = set()
-        self._addin_row_count = 0
+        self.filter_text = ""  # only rows whose name or group contains it are shown
+        self._row_ids: list[str | None] = []  # the mod of each table row; None: official DLC
         self._busy = False  # a long operation is running behind a progress dialog
         self._addins_error_shown = False
         self._links = links or []  # nxm:// links to download right after start
@@ -194,6 +197,7 @@ class ModManApp(App[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Input(placeholder="filter by name or group", id="filter")
         yield DataTable(id="mods", cursor_type="row", zebra_stripes=True)
         yield Vertical(id="downloads")
         yield Static("", id="status", markup=False)
@@ -202,6 +206,8 @@ class ModManApp(App[None]):
     async def on_mount(self) -> None:
         self.query_one("#mods", DataTable).add_columns(*COLUMNS)
         self.query_one("#downloads").display = False
+        self.query_one("#filter").display = False
+        self.query_one("#mods").focus()
         self.refresh_table()
         for error in [*self.library.errors, *self.presets.problems]:
             self.notify(error, severity="error", timeout=15, markup=False)
@@ -299,15 +305,23 @@ class ModManApp(App[None]):
         except (pathops.PathOpError, OSError) as exc:
             conflicting, misordered = set(), set()
             self.notify(str(exc), severity="error", markup=False)
+        ordered = self.library.ordered()
+        if select and not any(self._matches(m.name, e.group) for e, m in ordered if m.id == select):
+            self._set_filter("")  # never hide the mod that was just added or changed
         table.clear()
+        self._row_ids = []
         shipped = addins.shipped_uids(self.config.game_install_dir)
-        addin_rows = self.addin_rows()
-        self._addin_row_count = len(addin_rows)
-        for addin, kind in addin_rows:
+        for addin, kind in self.addin_rows():
+            if not self._matches(addin.name):
+                continue
+            self._row_ids.append(None)
             source = "game" if addin.uid.casefold() in shipped else "user dir"
             cells = ("", addin.name, addin.version, "", kind, source, "", "")
             table.add_row(*self._cells(addin.enabled, cells), key=f"addin:{addin.uid}")
-        for index, (entry, mod) in enumerate(self.library.ordered(), 1):
+        for index, (entry, mod) in enumerate(ordered, 1):
+            if not self._matches(mod.name, entry.group):
+                continue
+            self._row_ids.append(mod.id)
             options_note = self._options_note(mod)
             notes = [
                 note
@@ -334,12 +348,25 @@ class ModManApp(App[None]):
             if mod.id in misordered:
                 row[-1].stylize("bold red")
             table.add_row(*row, key=mod.id)
-        ids = [entry.id for entry in self.library.profile.mods]
-        if selected in ids:
-            table.move_cursor(row=self._addin_row_count + ids.index(selected))
-        elif ids:
-            table.move_cursor(row=self._addin_row_count)  # start on the first mod
+        mod_rows = [row for row, mod_id in enumerate(self._row_ids) if mod_id is not None]
+        if selected is not None and selected in self._row_ids:
+            table.move_cursor(row=self._row_ids.index(selected))
+        elif mod_rows:
+            table.move_cursor(row=mod_rows[0])  # start on the first mod
         self.refresh_status()
+
+    def _matches(self, *texts: str) -> bool:
+        wanted = self.filter_text.casefold()
+        return not wanted or any(wanted in text.casefold() for text in texts)
+
+    def _set_filter(self, text: str) -> None:
+        """Change the filter text; the input shows it and is hidden while there is none."""
+        self.filter_text = text.strip()
+        box = self.query_one("#filter", Input)
+        if box.value.strip() != self.filter_text:
+            box.value = self.filter_text
+        if not self.filter_text and self.focused is not box:
+            box.display = False
 
     def refresh_status(self) -> None:
         game = str(self.config.game_user_dir or "game user dir not found (set it in config.toml)")
@@ -351,17 +378,18 @@ class ModManApp(App[None]):
             kind = "premium" if self.account.get("is_premium") else "free"
             account = f"{self.account.get('name', '?')} ({kind})"
         deployed = "yes" if self.config.dirs.deployed_file.exists() else "no"
-        self.query_one("#status", Static).update(
-            f"Game: {game}  |  Nexus: {account}  |  Applied: {deployed}"
-        )
+        status = f"Game: {game}  |  Nexus: {account}  |  Applied: {deployed}"
+        if self.filter_text:
+            shown = sum(mod_id is not None for mod_id in self._row_ids)
+            status = (
+                f"Filter: {self.filter_text} ({shown} of {len(self.library.mods)})  |  {status}"
+            )
+        self.query_one("#status", Static).update(status)
 
     def current_entry(self) -> ProfileEntry | None:
-        table = self.query_one("#mods", DataTable)
-        entries = self.library.profile.mods
-        index = table.cursor_row - self._addin_row_count  # AddIn rows come first
-        if table.row_count and 0 <= index < len(entries):
-            return entries[index]
-        return None
+        row = self.query_one("#mods", DataTable).cursor_row
+        mod_id = self._row_ids[row] if 0 <= row < len(self._row_ids) else None
+        return self.library.profile.entry(mod_id) if mod_id else None
 
     def current_mod(self) -> Mod | None:
         entry = self.current_entry()
@@ -384,7 +412,35 @@ class ModManApp(App[None]):
         self.library.save_profile(f"{'hide' if profile.hide_official else 'show'} official DLC")
         self.refresh_table()
 
+    def action_filter(self) -> None:
+        box = self.query_one("#filter", Input)
+        box.display = True
+        box.focus()
+
+    def action_clear_filter(self) -> None:
+        if not self.filter_text and not self.query_one("#filter").display:
+            return
+        self.query_one("#mods").focus()
+        self.query_one("#filter").display = False
+        self._set_filter("")
+        self.refresh_table()
+
+    @on(Input.Changed, "#filter")
+    def filter_changed(self, event: Input.Changed) -> None:
+        if event.value.strip() != self.filter_text:
+            self.filter_text = event.value.strip()
+            self.refresh_table()
+
+    @on(Input.Submitted, "#filter")
+    def filter_submitted(self) -> None:
+        """Back to the list; the filter stays."""
+        self.query_one("#mods").focus()
+        self.query_one("#filter").display = bool(self.filter_text)
+
     def action_move(self, delta: int) -> None:
+        if self.filter_text:
+            self.notify("Clear the filter (esc) to move mods")
+            return
         entry = self.current_entry()
         if entry and self.library.profile.move(entry.id, delta):
             self.library.save_profile(f"move {entry.id} {'down' if delta > 0 else 'up'}")
@@ -688,7 +744,12 @@ class ModManApp(App[None]):
         self.push_screen(ConfirmScreen("\n".join(lines)), done)
 
     def check_action(self, action: str, parameters: tuple[object, ...]) -> bool:
-        """No key does anything while a long operation runs: not even quit."""
+        """No key does anything while a long operation runs: not even quit.
+
+        And while the filter is being typed, keys are text, not commands.
+        """
+        if self.focused is not None and self.focused.id == "filter":
+            return action == "clear_filter"
         return not self._busy
 
     async def run_with_progress(self, title: str, operation: Callable[..., T], *args: object) -> T:

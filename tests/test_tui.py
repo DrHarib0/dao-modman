@@ -1191,3 +1191,69 @@ async def test_item_list_of_a_mod(tmp_path: Path, dirs: Dirs, user_dir: Path) ->
         await pilot.pause()
         assert not isinstance(app.screen, ItemsScreen)
         assert any("Plain has no items" in n.message for n in app._notifications)
+
+
+async def test_filter_by_name_or_group(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    library = Library(dirs)
+    for name in ("Iron Armor", "Fancy Hair", "Steel Sword", "Armored Dog"):
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", {"a.erf": name}))
+    library.profile.entry("fancy-hair").group = "Looks"
+    library.profile.entry("steel-sword").group = "ARMORY"
+    library.save_profile()
+    app = make_app(tmp_path, dirs, user_dir)
+
+    def shown() -> list[tuple[str, str]]:
+        return [(row[0], row[2]) for row in rows(app)]
+
+    async with app.run_test(size=(140, 40)) as pilot:
+        box = app.query_one("#filter", Input)
+        assert not box.display and len(shown()) == 4
+
+        await pilot.press("slash", *"arMO")  # by name and by group, whatever the case
+        assert box.display and app.focused is box
+        assert shown() == [("1", "Iron Armor"), ("3", "Steel Sword"), ("4", "Armored Dog")]
+        assert "Filter: arMO (3 of 4)" in str(app.query_one("#status", Static).render())
+
+        await pilot.press(*"ry", "q", "a", "x")  # letters are text here, not commands
+        assert box.value == "arMOryqax" and shown() == []
+        assert not isinstance(app.screen, ConfirmScreen)
+        await pilot.press(*["backspace"] * 3)
+        assert shown() == [("3", "Steel Sword")]
+        await pilot.press(*["backspace"] * 2)
+
+        await pilot.press("enter")  # back to the list, the filter stays
+        assert app.focused is app.query_one("#mods") and box.display
+        assert app.current_mod().name == "Steel Sword"  # the selection survives the typing
+        await pilot.press("down", "space")  # acts on the row that is shown there
+        assert not library_entry(app, "armored-dog").enabled
+        assert (
+            library_entry(app, "fancy-hair").enabled and library_entry(app, "steel-sword").enabled
+        )
+        assert app.current_mod().name == "Armored Dog"
+
+        await pilot.press("K")  # no moving while rows are hidden
+        assert [entry.id for entry in app.library.profile.mods][-1] == "armored-dog"
+        assert any("Clear the filter" in n.message for n in app._notifications)
+
+        await pilot.press("escape")  # everything again, the selection kept
+        assert not box.display and box.value == "" and len(shown()) == 4
+        assert app.current_mod().name == "Armored Dog"
+        assert "Filter" not in str(app.query_one("#status", Static).render())
+        await pilot.press("K")
+        assert [entry.id for entry in app.library.profile.mods][-2] == "armored-dog"
+
+        await pilot.press("slash", "enter")  # an empty filter is none
+        assert not box.display and len(shown()) == 4
+
+        # a mod the filter would hide is shown when it arrives
+        await pilot.press("slash", *"hair", "enter")
+        assert len(shown()) == 1
+        new = app.library.import_archive(make_zip(tmp_path / "Boots.zip", {"b.erf": "b"}))
+        app.refresh_table(select=new.id)
+        await pilot.pause()
+        assert app.filter_text == "" and len(shown()) == 5 and app.current_mod().name == "Boots"
+        assert not box.display
+
+
+def library_entry(app: ModManApp, mod_id: str):
+    return app.library.profile.entry(mod_id)

@@ -55,6 +55,7 @@ The bar at the bottom shows the everyday keys; `?` lists all of them.
 | `a` / `x`        | apply / unapply                          |
 | `l`              | launch the game through Steam            |
 | `h`              | hide / show the game's official DLC      |
+| `/`              | filter by name or group (`esc` clears)   |
 | `t`              | tools (LAA, console, creator report)     |
 | `delete`         | remove mod from the library              |
 
