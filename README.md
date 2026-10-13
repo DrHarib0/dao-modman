@@ -50,13 +50,13 @@ The bar at the bottom shows the everyday keys; `?` lists all of them.
 | `o`              | open the mod's Nexus page in the browser |
 | `c`              | check Nexus for updates                  |
 | `u`              | update the selected mod in place         |
-| `v`              | conflict report                          |
+| `v`              | conflicts of the selected mod            |
 | `L`              | items the mod adds, by in-game name      |
 | `a` / `x`        | apply / unapply                          |
 | `l`              | launch the game through Steam            |
 | `h`              | hide / show the game's official DLC      |
 | `/`              | filter by name or group (`esc` clears)   |
-| `t`              | tools (LAA, console, creator report)     |
+| `t`              | tools (LAA, textures, all conflicts ...) |
 | `delete`         | remove mod from the library              |
 
 ## Data
@@ -271,8 +271,9 @@ off while another still lists its content. The command exits with status 1 when 
 
 ### Conflict report
 
-`v` in the TUI, or `dao-modman conflicts`, lists every contested file grouped by the mods that
-ship it. Mods are shown in load order with the winner last; under each file is every copy
+`v` in the TUI shows the conflicts the selected mod takes part in; "Show all conflicts" in
+the Tools menu (`t`), or `dao-modman conflicts`, shows them for the whole library. The
+report lists every contested file grouped by the mods that ship it. Mods are shown in load order with the winner last; under each file is every copy
 with its folder, and the one the game gets is marked:
 
     #4 Dain's Fixes  <  #5 Extras   (1 file)
@@ -297,7 +298,7 @@ red, the report says so, and `dao-modman conflicts` exits with status 1.
 
 To set it:
 
-- In the conflict report (`v`), `a` on a file line accepts that file; on a mods line it
+- In the conflict report (`v`, or the Tools menu), `a` on a file line accepts that file; on a mods line it
   accepts everything between those mods, including clashes that appear later. `a` again
   takes it back.
 - `dao-modman conflicts accept NAME ...` takes file names (globs allowed) or mod ids; a mod id

@@ -38,12 +38,17 @@ def _labels(library: Library) -> dict[str, tuple[int, str]]:
 _RANK = {ERROR: 0, OPEN: 1, ACCEPTED: 2}
 
 
-def conflict_groups(library: Library, plan: Plan) -> list[Group]:
-    """Conflicts grouped by the mods involved: errors first, then open, then accepted ones."""
+def conflict_groups(library: Library, plan: Plan, mod_id: str | None = None) -> list[Group]:
+    """Conflicts grouped by the mods involved: errors first, then open, then accepted ones.
+
+    With `mod_id`, only the groups that mod is part of.
+    """
     labels = _labels(library)
     groups: dict[tuple[str, ...], Group] = {}
     for conflict in sorted(plan.conflicts, key=lambda c: (_RANK[c.status], c.name.casefold())):
         key = tuple(conflict.mod_ids)
+        if mod_id is not None and mod_id not in key:
+            continue
         if key not in groups:
             groups[key] = Group([labels[mod_id] for mod_id in key], [])
         groups[key].conflicts.append(conflict)
@@ -120,25 +125,37 @@ def provider_lines(library: Library, conflict: Conflict) -> list[str]:
     return lines
 
 
-def merged_lines(library: Library, plan: Plan) -> list[str]:
+def merged_lines(library: Library, plan: Plan, mod_id: str | None = None) -> list[str]:
+    """Files merged from several mods; with `mod_id`, only those it contributes to."""
     labels = _labels(library)
     return [
         f"{target}  from " + ", ".join(f"#{labels[m][0]} {labels[m][1]}" for m in mod_ids)
         for target, mod_ids in plan.merged.items()
+        if mod_id is None or mod_id in mod_ids
     ]
 
 
-def unused_rules(library: Library) -> list[tuple[str, Overwrite]]:
+def unused_rules(library: Library, mod_id: str | None = None) -> list[tuple[str, Overwrite]]:
     """Overwrite rules naming a mod that is no longer in the library: `(declaring mod, rule)`.
 
-    They do nothing, but would silently apply again if that mod came back.
+    They do nothing, but would silently apply again if that mod came back. With `mod_id`,
+    only the rules that mod declares.
     """
     return [
         (mod.id, overwrite)
         for _entry, mod in library.ordered()
         for overwrite in mod.overwrites
-        if overwrite.mod not in library.mods
+        if overwrite.mod not in library.mods and mod_id in (None, mod.id)
     ]
+
+
+def has_conflicts(library: Library, plan: Plan, mod_id: str | None = None) -> bool:
+    """Whether the conflict report has anything to show, for the library or for one mod."""
+    return bool(
+        conflict_groups(library, plan, mod_id)
+        or merged_lines(library, plan, mod_id)
+        or unused_rules(library, mod_id)
+    )
 
 
 def unused_line(library: Library, mod_id: str, overwrite: Overwrite) -> str:

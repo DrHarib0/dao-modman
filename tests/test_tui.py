@@ -6,7 +6,7 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from textual.widgets import DataTable, Input, OptionList, Static, Tree
+from textual.widgets import DataTable, Input, Label, OptionList, Static, Tree
 
 from dao_modman.core.config import Config
 from dao_modman.core.library import Library
@@ -228,13 +228,13 @@ async def test_tools_menu_laa_patch_and_restore(
     app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 5
+        assert app.screen.query_one(OptionList).option_count == 6
         await pilot.press("enter")  # first entry: apply the patch
         await pilot.pause()
         assert laa.is_laa(exe)
 
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 4  # the patch entry is gone
+        assert app.screen.query_one(OptionList).option_count == 5  # the patch entry is gone
         await pilot.press("enter")
         await pilot.pause()
         assert not laa.is_laa(exe)
@@ -672,7 +672,7 @@ async def test_conflicts_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path) -> N
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("v")
         assert not isinstance(app.screen, ConflictsScreen)
-        assert [n.message for n in app._notifications][-1] == "No conflicts"
+        assert [n.message for n in app._notifications][-1] == "Alpha has no conflicts"
 
         app.library.import_archive(make_zip(tmp_path / "Beta.zip", {"robe.dds": "b"}))
         app.refresh_table()
@@ -1293,3 +1293,68 @@ async def test_tools_menu_sets_the_texture_size_limit(
         await pilot.pause()
         await pilot.press("escape")  # cancelled: nothing changes
         assert app.config.max_texture_size == 0
+
+
+async def test_v_shows_one_mods_conflicts_and_the_tool_all(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    from dao_modman.core import report
+    from dao_modman.core.models import Overwrite
+    from dao_modman.tui.screens import ConflictsScreen
+
+    library = Library(dirs)
+    files = {
+        "Alpha": {"robe.dds": "a", "chargenmorphcfg.xml": "<morph_config><hairs/></morph_config>"},
+        "Beta": {"robe.dds": "b", "sword.dds": "b"},
+        "Gamma": {"sword.dds": "c", "chargenmorphcfg.xml": "<morph_config><hairs/></morph_config>"},
+        "Delta": {"alone.erf": "d"},
+    }
+    for name, content in files.items():
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", content))
+    library.mods["delta"].overwrites = [Overwrite("removed-mod")]
+    library.save_mod(library.mods["delta"])
+    app = make_app(tmp_path, dirs, user_dir)
+
+    def sections() -> list[str]:
+        return [str(node.label) for node in app.screen.query_one(Tree).root.children]
+
+    robe, sword = "#1 Alpha  <  #2 Beta   (1 file)", "#2 Beta  <  #3 Gamma   (1 file)"
+    merged, unused = "Merged (no mod loses)", report.UNUSED_TITLE
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("v")  # Alpha: its conflict with Beta, and the merge it is part of
+        assert isinstance(app.screen, ConflictsScreen)
+        title = str(app.screen.query_one(".title", Label).render())
+        assert title.startswith("Conflicts of Alpha")
+        assert sections() == [robe, merged]
+        await pilot.press("a")  # accepting works here as in the full report
+        assert sections() == ["#1 Alpha  <  #2 Beta   (1 file, accepted)", merged]
+        await pilot.press("a", "escape")
+
+        await pilot.press("down", "v")  # Beta is in both conflicts, in no merge
+        assert sections() == [robe, sword]
+        await pilot.press("escape", "down", "v")  # Gamma
+        assert sections() == [sword, merged]
+        await pilot.press("escape", "down", "v")  # Delta: only its unused rule
+        assert sections() == [unused]
+        await pilot.press("escape")
+
+        await pilot.press("t")  # the whole library, from the tools menu
+        labels = [str(option.prompt) for option in app.screen.query_one(OptionList).options]
+        await pilot.press(*["down"] * labels.index("Show all conflicts"), "enter")
+        await pilot.pause()
+        assert isinstance(app.screen, ConflictsScreen)
+        assert str(app.screen.query_one(".title", Label).render()).startswith("Conflicts (")
+        assert sections() == [robe, sword, merged, unused]
+
+
+async def test_all_conflicts_tool_without_conflicts(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    Library(dirs).import_archive(make_zip(tmp_path / "Alpha.zip", {"a.erf": "a"}))
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("t")
+        labels = [str(option.prompt) for option in app.screen.query_one(OptionList).options]
+        await pilot.press(*["down"] * labels.index("Show all conflicts"), "enter")
+        await pilot.pause()
+        assert [n.message for n in app._notifications][-1] == "No conflicts"

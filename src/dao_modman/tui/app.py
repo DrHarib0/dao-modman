@@ -123,7 +123,7 @@ KEYS = [
     Key("escape", "clear_filter", "Unfilter", "Clear the filter", "Mod list", display="esc"),
     Key("e", "edit_paths", "Paths", "Remove or rename the files a mod installs", "Mod contents"),
     Key("p", "options", "Options", "Choose the variants of an override package", "Mod contents"),
-    Key("v", "conflicts", "Conflicts", "Show which mods ship the same files", "Mod contents"),
+    Key("v", "conflicts", "Conflicts", "Show the files the mod shares with others", "Mod contents"),
     Key("L", "items", "Items", "List the items a mod adds, by their in-game names", "Mod contents"),
     Key("i", "import_file", "Import", "Import a local archive", "Nexus"),
     Key("o", "open_page", "Nexus page", "Open the mod's Nexus page in the browser", "Nexus"),
@@ -133,7 +133,7 @@ KEYS = [
         "t",
         "tools",
         "Tools",
-        "Tools: LAA patch, texture size, developer console, creator report",
+        "Tools: LAA patch, texture size, all conflicts, console, creator report",
         "Game",
     ),
 ]
@@ -699,14 +699,21 @@ class ModManApp(App[None]):
     # -- deployment -------------------------------------------------------
 
     def action_conflicts(self) -> None:
-        """Show which mods ship the same files, and whose copy wins."""
+        """Show the files the selected mod shares with other mods, and whose copy wins."""
+        if mod := self.current_mod():
+            self.show_conflicts(mod)
+
+    def show_conflicts(self, mod: Mod | None = None) -> None:
+        """The conflict report: for one mod, or for the whole library."""
         try:
             plan = deploy.build_plan(self.library)
         except (pathops.PathOpError, MetadataError, OSError) as exc:
             self.error(exc)
             return
-        if plan.conflicts or plan.merged or report.unused_rules(self.library):
-            self.push_screen(ConflictsScreen(self.library), lambda _: self.refresh_table())
+        if report.has_conflicts(self.library, plan, mod.id if mod else None):
+            self.push_screen(ConflictsScreen(self.library, mod), lambda _: self.refresh_table())
+        elif mod:
+            self.notify(f"{mod.name} has no conflicts", markup=False)
         else:
             self.notify("No conflicts")
 
@@ -917,6 +924,7 @@ class ModManApp(App[None]):
         limit = self.config.max_texture_size
         current = textures.LIMITS.get(limit, f"{limit} px")
         tools.append(("texture_size", f"Limit the size of textures - currently {current}"))
+        tools.append(("conflicts", "Show all conflicts"))
         try:
             console_on = bool(install_dir) and console.is_enabled(install_dir)
         except console.ConsoleError:
@@ -933,6 +941,8 @@ class ModManApp(App[None]):
                 self.show_chargen_report()
             elif tool == "texture_size":
                 self.choose_texture_size()
+            elif tool == "conflicts":
+                self.show_conflicts()
             elif tool:
                 self.run_tool(tool)
 

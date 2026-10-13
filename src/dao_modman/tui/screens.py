@@ -475,13 +475,15 @@ class ConflictsScreen(ModalScreen[None]):
         Binding("escape,q,v", "close", "Close"),
     ]
 
-    def __init__(self, library: Library) -> None:
+    def __init__(self, library: Library, mod: Mod | None = None) -> None:
         super().__init__()
         self.library = library
+        self.mod_id = mod.id if mod else None  # only what involves this mod; None: everything
+        self.title_text = f"Conflicts of {mod.name}" if mod else "Conflicts"
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog wide tall"):
-            yield Label("Conflicts (the last mod wins)", classes="title")
+            yield Label(f"{self.title_text} (the last mod wins)", classes="title", markup=False)
             yield PathTree("Conflicts", id="conflicts")
             yield Label(
                 "[b]a[/] accept as intended / take back / drop unused rule   "
@@ -500,7 +502,7 @@ class ConflictsScreen(ModalScreen[None]):
         tree = self.query_one("#conflicts", PathTree)
         tree.clear()
         nodes = {}
-        for group in report.conflict_groups(self.library, plan):
+        for group in report.conflict_groups(self.library, plan, self.mod_id):
             group_node = tree.root.add(
                 escape(report.group_line(group)), data=("group", group), expand=True
             )
@@ -511,11 +513,11 @@ class ConflictsScreen(ModalScreen[None]):
                 nodes[f"{group.title}/{conflict.name}"] = file_node
                 for copy in report.provider_lines(self.library, conflict):
                     file_node.add_leaf(escape(copy))
-        if merged := report.merged_lines(self.library, plan):
+        if merged := report.merged_lines(self.library, plan, self.mod_id):
             merged_node = tree.root.add("Merged (no mod loses)", expand=True)
             for line in merged:
                 merged_node.add_leaf(escape(line))
-        if unused := report.unused_rules(self.library):
+        if unused := report.unused_rules(self.library, self.mod_id):
             unused_node = tree.root.add(report.UNUSED_TITLE, expand=True)
             nodes[report.UNUSED_TITLE] = unused_node
             for mod_id, rule in unused:
