@@ -165,6 +165,17 @@ writes both tables itself, from the game's archives and from the mod files being
 the items of the encrypted DLC archives and of the offers, which the scanner cannot see,
 follow.
 
+### Texture size
+
+The game is a 32-bit program and runs out of memory when a texture pack brings very large
+textures: loading a save then crashes. `max_texture_size` in `config.toml` sets the longest
+side, in pixels, a deployed texture may have (default `4096`; `0` for no limit; a power of
+two). The Tools menu (`t`) sets it to no limit, 1K, 2K or 4K. Larger textures are written to the game folder without their largest mipmap levels,
+so nothing is compressed again and the library keeps the originals; change the value and
+apply again to try another. Textures that cannot be reduced this way (no mipmaps, an
+unusual format) are deployed as they are and reported; textures inside `.erf` archives are
+not touched.
+
 ## Ignored files
 
 The game only loads its own resource types. Readmes, pictures, links and similar files that
@@ -373,6 +384,7 @@ is installed through dao-modman, it offers the predefined path operation that ro
         addins.py      # Settings/AddIns.xml
         chargen.py     # chargenmorphcfg.xml merging and its report
         itemlists.py   # item tables for the Add Any Item mod, written at apply
+        textures.py    # texture size limit at apply
         moditems.py    # the items a mod adds, by in-game name
         gff.py         # readers for item files and talk tables
         erf.py         # reader for the game's ERF archives

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -11,6 +12,7 @@ from dotenv import dotenv_values
 
 from . import ipc, paths
 from .ignore import DEFAULT_PATTERNS
+from .metadata import write_atomic
 from .paths import Dirs
 
 TOKEN_VAR = "NEXUS_API_TOKEN"
@@ -29,6 +31,8 @@ class Config:
     ignore: list[str] = field(default_factory=lambda: list(DEFAULT_PATTERNS))
     presets_file: Path | None = None  # the user's own predefined path operations
     language: str = "en-us"  # which talk tables item names are read from
+    max_texture_size: int = 4096  # longest side of a deployed texture in pixels; 0: no limit
+    config_file: Path | None = None  # where settings changed in the app are written
 
 
 def load_token(config_dir: Path, cwd: Path | None = None) -> str | None:
@@ -42,6 +46,28 @@ def load_token(config_dir: Path, cwd: Path | None = None) -> str | None:
             if token:
                 return token.strip()
     return None
+
+
+def set_option(config_file: Path, key: str, value: int) -> None:
+    """Set a top-level number in config.toml, leaving the rest of the file as it is.
+
+    The file is the user's, comments included, so it is edited as text: the key's line is
+    replaced, or added above the first table if there is none yet.
+    """
+    text = config_file.read_text(encoding="utf-8") if config_file.is_file() else ""
+    lines = text.splitlines()
+    tables = [index for index, line in enumerate(lines) if line.startswith("[")]
+    top = lines[: tables[0]] if tables else lines
+    own = [index for index, line in enumerate(top) if re.match(rf"{re.escape(key)}\s*=", line)]
+    if own:
+        lines[own[0]] = f"{key} = {value}"
+    else:
+        lines.insert(len(top), f"{key} = {value}")
+    new = "\n".join(lines) + "\n"
+    if tomllib.loads(new).get(key) != value:  # e.g. the key sits inside a multi-line value
+        raise ValueError(f"cannot set {key} in {config_file}: edit the file by hand")
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    write_atomic(config_file, new.encode())
 
 
 def load_config() -> Config:
@@ -69,4 +95,6 @@ def load_config() -> Config:
         ignore=[str(p) for p in raw["ignore"]] if "ignore" in raw else list(DEFAULT_PATTERNS),
         presets_file=config_dir / "presets.toml",
         language=str(raw.get("language") or "en-us"),
+        max_texture_size=int(raw.get("max_texture_size", 4096)),
+        config_file=config_file,
     )

@@ -228,13 +228,13 @@ async def test_tools_menu_laa_patch_and_restore(
     app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 4
+        assert app.screen.query_one(OptionList).option_count == 5
         await pilot.press("enter")  # first entry: apply the patch
         await pilot.pause()
         assert laa.is_laa(exe)
 
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 3  # the patch entry is gone
+        assert app.screen.query_one(OptionList).option_count == 4  # the patch entry is gone
         await pilot.press("enter")
         await pilot.pause()
         assert not laa.is_laa(exe)
@@ -1257,3 +1257,39 @@ async def test_filter_by_name_or_group(tmp_path: Path, dirs: Dirs, user_dir: Pat
 
 def library_entry(app: ModManApp, mod_id: str):
     return app.library.profile.entry(mod_id)
+
+
+async def test_tools_menu_sets_the_texture_size_limit(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    file = tmp_path / "config.toml"
+    file.write_text('# keep me\nterminal = "kitty"\n')
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, config_file=file))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("t")
+        labels = [str(option.prompt) for option in app.screen.query_one(OptionList).options]
+        entry = next(i for i, label in enumerate(labels) if "size of textures" in label)
+        assert labels[entry].endswith("currently 4K (4096 px)")
+        await pilot.press(*["down"] * entry, "enter")
+        await pilot.pause()
+        options = app.screen.query_one(OptionList)
+        assert [str(o.prompt) for o in options.options] == [
+            "No limit", "1K (1024 px)", "2K (2048 px)", "4K (4096 px)",
+        ]  # fmt: skip
+        assert options.highlighted == 3  # the current value
+        await pilot.press("up", "enter")
+        await pilot.pause()
+        assert app.config.max_texture_size == 2048
+        assert file.read_text() == '# keep me\nterminal = "kitty"\nmax_texture_size = 2048\n'
+        assert any("2K (2048 px)" in n.message for n in app._notifications)
+
+        await pilot.press("t", *["down"] * entry, "enter")
+        await pilot.pause()
+        await pilot.press("home", "enter")  # no limit
+        await pilot.pause()
+        assert app.config.max_texture_size == 0 and "max_texture_size = 0" in file.read_text()
+
+        await pilot.press("t", *["down"] * entry, "enter")
+        await pilot.pause()
+        await pilot.press("escape")  # cancelled: nothing changes
+        assert app.config.max_texture_size == 0

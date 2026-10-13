@@ -10,6 +10,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from . import addins, chargen
 from .archive import sha256_file
@@ -18,6 +19,9 @@ from .library import Library
 from .metadata import write_atomic
 from .models import Mod
 from .paths import normalize_rel, resolve_case
+
+if TYPE_CHECKING:
+    from .textures import Reduction
 
 _CHUNK = 1024 * 1024
 
@@ -42,6 +46,7 @@ class PlannedFile:
     source: Path
     mod_id: str
     content: bytes | None = None  # generated file: written instead of copying `source`
+    reduction: Reduction | None = None  # texture to be written smaller than `source`
 
 
 OPEN = "open"  # an ordinary conflict
@@ -261,6 +266,10 @@ def _write_hashed(planned: PlannedFile, dest: Path) -> str:
             out.write(planned.content)
             return digest.hexdigest()
         with planned.source.open("rb") as src:
+            if planned.reduction is not None:
+                digest.update(planned.reduction.header)
+                out.write(planned.reduction.header)
+                src.seek(planned.reduction.offset)
             while chunk := src.read(_CHUNK):
                 digest.update(chunk)
                 out.write(chunk)

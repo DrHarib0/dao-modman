@@ -73,8 +73,34 @@ def test_load_config_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert cfg.nexus_token == "tok"
     assert cfg.presets_file == config_dir / "presets.toml"
     assert cfg.language == "en-us"
+    assert cfg.max_texture_size == 4096
     assert "*.txt" in cfg.ignore and "*readme*" in cfg.ignore  # built-in list by default
 
     with (config_dir / "config.toml").open("a") as fh:
         fh.write('ignore = ["*.txt", "/docs/"]\n')
     assert config.load_config().ignore == ["*.txt", "/docs/"]
+
+
+def test_set_option_keeps_the_rest_of_the_file(tmp_path: Path) -> None:
+    file = tmp_path / "new" / "config.toml"
+    config.set_option(file, "max_texture_size", 2048)  # no file yet
+    assert file.read_text() == "max_texture_size = 2048\n"
+
+    text = (
+        'terminal = "kitty"\n\n# what is never deployed\nignore = [\n    "*.txt",  # text\n]\n'
+        "max_texture_size=2048\n\n[table]\nmax_texture_size = 1\n"
+    )
+    file.write_text(text)
+    config.set_option(file, "max_texture_size", 0)
+    assert file.read_text() == text.replace("max_texture_size=2048", "max_texture_size = 0")
+
+    file.write_text('# mine\nterminal = "kitty"\n\n[table]\nkey = 1\n')
+    config.set_option(file, "max_texture_size", 1024)  # added above the first table
+    assert file.read_text() == (
+        '# mine\nterminal = "kitty"\n\nmax_texture_size = 1024\n[table]\nkey = 1\n'
+    )
+
+    file.write_text('note = """\nmax_texture_size = 5\n"""\n')
+    with pytest.raises(ValueError, match="by hand"):
+        config.set_option(file, "max_texture_size", 4096)
+    assert "max_texture_size = 5" in file.read_text()  # left untouched

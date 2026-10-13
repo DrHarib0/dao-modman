@@ -31,8 +31,9 @@ from ..core import (
     presets,
     report,
     revisions,
+    textures,
 )
-from ..core.config import Config
+from ..core.config import Config, set_option
 from ..core.dazip import AddIn
 from ..core.install import install_from_nexus, link_to_nexus
 from ..core.library import Library, LibraryError
@@ -132,7 +133,7 @@ KEYS = [
         "t",
         "tools",
         "Tools",
-        "Tools: LAA patch, developer console, character creator report",
+        "Tools: LAA patch, texture size, developer console, creator report",
         "Game",
     ),
 ]
@@ -781,12 +782,15 @@ class ModManApp(App[None]):
         deployed_file = self.config.dirs.deployed_file
         install_dir = self.config.game_install_dir
 
-        def apply(progress: deploy.Progress) -> tuple[deploy.ApplyResult, str | None]:
+        def apply(
+            progress: deploy.Progress,
+        ) -> tuple[deploy.ApplyResult, str | None, textures.Summary]:
             note = itemlists.fill(plan, install_dir, user_dir, deployed_file, progress)
-            return deploy.apply(plan, user_dir, deployed_file, progress), note
+            reduced = textures.limit(plan, self.config.max_texture_size, progress)
+            return deploy.apply(plan, user_dir, deployed_file, progress), note, reduced
 
         try:
-            result, note = await self.run_with_progress("Applying mods", apply)
+            result, note, reduced = await self.run_with_progress("Applying mods", apply)
         except (deploy.DeployError, OSError, ValueError) as exc:
             self.error(exc)
             return
@@ -797,8 +801,11 @@ class ModManApp(App[None]):
         if result.skipped:
             message += f", left {len(result.skipped)} existing file(s) untouched"
         self.notify(message)
-        if note:
-            self.notify(note, markup=False)
+        for text in (note, reduced.note()):
+            if text:
+                self.notify(text, markup=False)
+        if warning := reduced.warning():
+            self.notify(warning, severity="warning", timeout=10, markup=False)
 
     def action_unapply(self) -> None:
         self.start_unapply()
@@ -907,6 +914,9 @@ class ModManApp(App[None]):
         tools = [("laa_restore", "Restore the original game executable")]
         if state != laa.PATCHED:
             tools.insert(0, ("laa_patch", f"Apply the LAA (4 GB) patch - currently {state}"))
+        limit = self.config.max_texture_size
+        current = textures.LIMITS.get(limit, f"{limit} px")
+        tools.append(("texture_size", f"Limit the size of textures - currently {current}"))
         try:
             console_on = bool(install_dir) and console.is_enabled(install_dir)
         except console.ConsoleError:
@@ -921,10 +931,35 @@ class ModManApp(App[None]):
         def done(tool: str | None) -> None:
             if tool == "chargen":
                 self.show_chargen_report()
+            elif tool == "texture_size":
+                self.choose_texture_size()
             elif tool:
                 self.run_tool(tool)
 
         self.push_screen(ChoiceScreen("Tools", tools), done)
+
+    def choose_texture_size(self) -> None:
+        """Set the longest side a deployed texture may have; kept in config.toml."""
+
+        def done(choice: str | None) -> None:
+            if choice is None or int(choice) == self.config.max_texture_size:
+                return
+            if self.config.config_file is None:
+                self.error("No config file to save the setting in")
+                return
+            try:
+                set_option(self.config.config_file, "max_texture_size", int(choice))
+            except (OSError, ValueError) as exc:
+                self.error(exc)
+                return
+            self.config.max_texture_size = int(choice)
+            label = textures.LIMITS[int(choice)]
+            self.notify(f"Texture size limit: {label}. Apply to put it into effect.")
+
+        choices = [(str(size), label) for size, label in textures.LIMITS.items()]
+        title = "Largest texture to deploy (larger ones are reduced at apply)"
+        selected = str(self.config.max_texture_size)
+        self.push_screen(ChoiceScreen(title, choices, selected=selected), done)
 
     @work
     async def show_chargen_report(self) -> None:
