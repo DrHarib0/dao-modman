@@ -222,14 +222,25 @@ async def test_tools_menu_laa_patch_and_restore(
 
     install_dir = tmp_path / "game"
     exe = make_exe(install_dir / "bin_ship/DAOrigins.exe", large_address_aware=False)
-    bundled = make_exe(tmp_path / "bundled.exe", large_address_aware=True)
-    monkeypatch.setattr(laa, "bundled_exe", lambda: bundled)
+    patched = make_exe(tmp_path / "patched.exe", large_address_aware=True)
 
     app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir))
+    opened: list[str] = []
+    app.open_url = lambda url, **_: opened.append(url)
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("t")
         assert app.screen.query_one(OptionList).option_count == 6
         await pilot.press("enter")  # first entry: apply the patch
+        await pilot.pause()
+        assert opened == [laa.GUIDE_URL]
+        await pilot.press("escape")  # no path given: nothing happens
+        await pilot.pause()
+        assert not laa.is_laa(exe)
+
+        await pilot.press("t", "enter")
+        await pilot.pause()
+        app.screen.query_one(Input).value = str(patched)
+        await pilot.press("enter")
         await pilot.pause()
         assert laa.is_laa(exe)
 

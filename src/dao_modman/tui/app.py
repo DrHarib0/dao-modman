@@ -943,6 +943,8 @@ class ModManApp(App[None]):
                 self.choose_texture_size()
             elif tool == "conflicts":
                 self.show_conflicts()
+            elif tool == "laa_patch":
+                self.patch_laa()
             elif tool:
                 self.run_tool(tool)
 
@@ -985,16 +987,34 @@ class ModManApp(App[None]):
             return
         self.push_screen(TextScreen("Character creator list", text))
 
+    def patch_laa(self) -> None:
+        """Open the guide to getting an LAA executable, then install the one the user names."""
+        install_dir = self.config.game_install_dir
+        if not install_dir:
+            self.error("Game install dir not found: set game_install_dir in config.toml")
+            return
+
+        def done(path: str | None) -> None:
+            if not path:
+                return
+            try:
+                backup = laa.patch(install_dir, Path(path))
+            except laa.LaaError as exc:
+                self.error(exc)
+                return
+            self.notify(f"LAA patch applied, original saved as {backup.name}", markup=False)
+
+        self.open_url(laa.GUIDE_URL)
+        title = "Path of your LAA-patched DAOrigins.exe (the guide is open in your browser)"
+        self.push_screen(TextPromptScreen(title, placeholder="/path/to/DAOrigins.exe"), done)
+
     def run_tool(self, tool: str) -> None:
         install_dir = self.config.game_install_dir
         if not install_dir:
             self.error("Game install dir not found: set game_install_dir in config.toml")
             return
         try:
-            if tool == "laa_patch":
-                backup = laa.patch(install_dir)
-                self.notify(f"LAA patch applied, original saved as {backup.name}", markup=False)
-            elif tool == "laa_restore":
+            if tool == "laa_restore":
                 laa.restore(install_dir)
                 self.notify("Original game executable restored")
             elif tool == "console_enable":

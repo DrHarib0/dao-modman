@@ -1,4 +1,4 @@
-"""Large Address Aware patch: swap the game executable for the bundled LAA-patched copy.
+"""Large Address Aware patch: swap the game executable for an LAA-patched copy the user has.
 
 A 32-bit Windows process only gets 2 GB of address space unless its executable carries the
 LAA flag; heavily modded games run out of that quickly.
@@ -9,14 +9,14 @@ from __future__ import annotations
 import os
 import shutil
 import struct
-from importlib import resources
 from pathlib import Path
 
 from .paths import resolve_case
 
 EXE_REL = "bin_ship/DAOrigins.exe"
 BACKUP_SUFFIX = ".pre-laa"
-BUNDLED = "assets/laa/DAOrigins.exe"
+# how to get a patched executable; the Steam one cannot simply be flagged in place
+GUIDE_URL = "https://steamcommunity.com/sharedfiles/filedetails/?id=233222451"
 
 PATCHED = "patched"
 UNPATCHED = "unpatched"
@@ -44,12 +44,6 @@ def is_laa(exe: Path) -> bool:
     return bool(struct.unpack_from("<H", coff, 22)[0] & _LARGE_ADDRESS_AWARE)
 
 
-def bundled_exe() -> Path | None:
-    """The LAA-patched executable shipped with dao-modman, if present."""
-    path = resolve_case(Path(str(resources.files("dao_modman"))), BUNDLED)
-    return path if path.is_file() else None
-
-
 def game_exe(install_dir: Path) -> Path:
     exe = resolve_case(install_dir, EXE_REL)
     if not exe.is_file():
@@ -75,16 +69,14 @@ def _replace(source: Path, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def patch(install_dir: Path, patched_exe: Path | None = None) -> Path:
-    """Install the LAA executable. Returns the path of the backup of the original."""
+def patch(install_dir: Path, patched_exe: Path) -> Path:
+    """Install the given LAA executable. Returns the path of the backup of the original."""
     exe = game_exe(install_dir)
     if is_laa(exe):
         raise LaaError("the game executable is already Large Address Aware")
-    source = patched_exe or bundled_exe()
-    if source is None:
-        raise LaaError(
-            f"no LAA executable bundled: add it as src/dao_modman/{BUNDLED} or pass a path"
-        )
+    source = patched_exe.expanduser()
+    if not source.is_file():
+        raise LaaError(f"{source} not found")
     if not is_laa(source):
         raise LaaError(f"{source} is not Large Address Aware")
     backup = backup_path(exe)

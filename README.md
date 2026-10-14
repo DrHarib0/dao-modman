@@ -65,7 +65,7 @@ Most functionality is also exposed via a command line interface:
 
     uv run dao-modman nxm 'nxm://...'      # hand a "Mod Manager Download" link to the TUI
     uv run dao-modman install-nxm-handler  # register as nxm:// handler
-    uv run dao-modman laa status|patch|restore   # Large Address Aware patch, see below
+    uv run dao-modman laa status|restore|patch --exe PATH   # Large Address Aware patch
     uv run dao-modman console status|enable|disable   # developer console, see below
     uv run dao-modman revisions init       # keep a git history of the library's metadata
     uv run dao-modman chargen              # check the merged character creator list
@@ -110,8 +110,7 @@ See the [user and behind-the-scenes documentation](docs/Readme.md).
 ## License
 
 [MIT](LICENSE): free to use, change and pass on, as long as the copyright notice naming the author
-stays with it. The license covers the code of this project, not the bundled `DAOrigins.exe`, which
-belongs to its publisher.
+stays with it.
 
 ## Disclosure
 

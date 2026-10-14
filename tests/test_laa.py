@@ -81,10 +81,10 @@ def test_patch_rejects_unsuitable_sources(tmp_path: Path, install_dir: Path) -> 
         laa.patch(tmp_path / "nowhere", not_laa)
 
 
-def test_patch_without_bundled_exe(install_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(laa, "bundled_exe", lambda: None)
-    with pytest.raises(laa.LaaError, match="no LAA executable bundled"):
-        laa.patch(install_dir)
+def test_patch_with_missing_exe(tmp_path: Path, install_dir: Path) -> None:
+    with pytest.raises(laa.LaaError, match="not found"):
+        laa.patch(install_dir, tmp_path / "missing.exe")
+    assert laa.status(install_dir) == laa.UNPATCHED
 
 
 def test_find_game_install_dir(tmp_path: Path) -> None:
@@ -110,6 +110,8 @@ def test_cli(
 
     assert cli.main(["laa", "status"]) == 0
     assert "unpatched" in capsys.readouterr().out
+    assert cli.main(["laa", "patch"]) == 1
+    assert laa.GUIDE_URL in capsys.readouterr().err
     assert cli.main(["laa", "patch", "--exe", str(patched)]) == 0
     assert laa.status(install_dir) == laa.PATCHED
     assert cli.main(["laa", "patch", "--exe", str(patched)]) == 1
