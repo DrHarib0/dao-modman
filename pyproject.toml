@@ -1,7 +1,7 @@
 [project]
 name = "dao-modman"
 authors = [{ name = "Sebastian Mahr" }]
-version = "0.1.0"
+dynamic = ["version"]
 description = "Terminal mod manager for Dragon Age: Origins"
 readme = "README.md"
 license = "MIT"
@@ -32,6 +32,7 @@ dependencies = [
 Homepage = "https://github.com/DrHarib0/dao-modman"
 Documentation = "https://github.com/DrHarib0/dao-modman/blob/main/docs/Readme.md"
 Issues = "https://github.com/DrHarib0/dao-modman/issues"
+Changelog = "https://github.com/DrHarib0/dao-modman/releases"
 
 [project.scripts]
 dao-modman = "dao_modman.__main__:main"
@@ -40,8 +41,15 @@ dao-modman = "dao_modman.__main__:main"
 dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "textual-dev>=1.5"]
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
+
+[tool.hatch.version]
+source = "vcs"  # from the git tags: vX.Y.Z on a release, X.Y.(Z+1).devN+g<hash> after it
+
+[tool.uv]
+# rebuild the version when HEAD or the tags change, not only when pyproject.toml does
+cache-keys = [{ file = "pyproject.toml" }, { git = { commit = true, tags = true } }]
 
 [tool.hatch.build.targets.sdist]
 include = ["src", "tests", "docs", "README.md", "LICENSE"]

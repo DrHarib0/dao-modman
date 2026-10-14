@@ -374,7 +374,6 @@ wheels = [
 
 [[package]]
 name = "dao-modman"
-version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx2" },

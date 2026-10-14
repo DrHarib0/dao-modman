@@ -130,3 +130,14 @@ To work from source, clone this repository and run `uv sync`; then start it with
 
     uv run pytest                                  # tests
     uv run ruff check . && uv run ruff format .    # lint and format
+
+The version comes from the git tags: a release tag `vX.Y.Z` builds as exactly that version,
+later commits as a pre-release of the next one (e.g. `0.1.1.dev4+g7a7a715`).
+
+Releases are started by hand: Actions → Release → Run workflow, or `gh workflow run publish.yml`.
+The workflow runs the tests, derives the next version from the [conventional
+commits](https://www.conventionalcommits.org) since the last release (`feat:` → minor, anything
+else → patch; an explicit version can be given), tags the tested commit, creates the GitHub
+release with the changes since the last one as notes, written by [git-cliff](https://git-cliff.org),
+and publishes the package to PyPI. There is no changelog file in the repository; `uvx git-cliff`
+prints the full changelog from the history.

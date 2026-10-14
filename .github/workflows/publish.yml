@@ -1,25 +1,86 @@
-name: Publish to PyPI
+# Started by hand (Actions → Release → Run workflow, or `gh workflow run publish.yml`):
+# tests, the next version from the conventional commits (git-cliff), a tag on the tested
+# commit, a GitHub release with that version's changelog as notes, then the package on PyPI.
+name: Release
 
 on:
-  release:
-    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.0 (empty: derived from the commits)"
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  GIT_CLIFF: git-cliff==2.14.2
 
 jobs:
-  build:
+  ci:
+    uses: ./.github/workflows/ci.yml
+
+  release:
+    needs: ci
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      contents: write # push the tag, create the GitHub release
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
-      - name: Check the release tag matches the package version
+      - name: Determine the version
+        id: version
+        env:
+          REQUESTED: ${{ inputs.version }}
         run: |
-          version="$(uv version --short)"
-          if [ "${GITHUB_REF_NAME#v}" != "$version" ]; then
-            echo "::error::release tag $GITHUB_REF_NAME does not match version $version in pyproject.toml"
+          if [ -n "$REQUESTED" ]; then
+            tag="v${REQUESTED#v}"
+          else
+            tag="$(uvx "$GIT_CLIFF" --bumped-version)"
+          fi
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "::error::$tag already exists"
             exit 1
           fi
+          echo "Releasing $tag"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+      - name: Tag the tested commit
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+      - name: Create the GitHub release
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uvx "$GIT_CLIFF" --latest --strip header > notes.md
+          gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+
+  build:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ needs.release.outputs.tag }}
+          fetch-depth: 0 # hatch-vcs reads the version from the tag
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
       - run: uv build
       - uses: actions/upload-artifact@v4
         with:
