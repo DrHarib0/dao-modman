@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from fnmatch import fnmatchcase
-from typing import TypeVar
 
 from . import dazip, overridepkg
 from .models import (
@@ -18,8 +17,6 @@ from .models import (
     PathOp,
 )
 from .paths import normalize_rel
-
-T = TypeVar("T")
 
 OVERRIDE_DIR = "packages/core/override"
 _GLOB_CHARS = frozenset("*?[")
@@ -123,7 +120,7 @@ def validate(op: PathOp) -> PathOp:
     raise PathOpError(f"unknown operation {op.op!r}")
 
 
-def apply_op(mapping: dict[str, T], op: PathOp) -> dict[str, T]:
+def apply_op[T](mapping: dict[str, T], op: PathOp) -> dict[str, T]:
     op = validate(op)
     result: dict[str, T] = {}
     moved: dict[str, T] = {}
@@ -142,7 +139,7 @@ def apply_op(mapping: dict[str, T], op: PathOp) -> dict[str, T]:
     return result
 
 
-def apply_ops(mapping: dict[str, T], ops: list[PathOp]) -> dict[str, T]:
+def apply_ops[T](mapping: dict[str, T], ops: list[PathOp]) -> dict[str, T]:
     """Run `ops` in order over a target -> source mapping."""
     for op in ops:
         mapping = apply_op(mapping, op)
