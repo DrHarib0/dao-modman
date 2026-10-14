@@ -4,7 +4,7 @@ Terminal based mod manager for
 [**Dragon Age: Origins**](https://store.steampowered.com/app/47810/Dragon_Age_Origins__Ultimate_Edition/) 
 on Steam/Proton (Linux), heavily inspired by [MO2](https://www.modorganizer.org/).
 
-![Screenshot of the TUI](docs/img/ui-screenshot-1.png)
+![Screenshot of the TUI](https://raw.githubusercontent.com/DrHarib0/dao-modman/main/docs/img/ui-screenshot-1.png)
 
 ## A tribute to a masterpiece
 
@@ -42,12 +42,15 @@ yet. Porting is not a big deal, but it needs testing on those setups: volunteers
 
 ## Setup
 
-Clone this repository, [install uv](https://docs.astral.sh/uv/getting-started/installation/) if you haven't yet, and let it do the rest. 
-Alternatively, `pip install .` in a venv for manual setup.
+Install it from PyPI with [uv](https://docs.astral.sh/uv/getting-started/installation/), or with pipx:
 
+    uv tool install dao-modman             # or: pipx install dao-modman
 
-    uv sync
-    echo 'NEXUS_API_TOKEN=...' > .env      # personal API key from nexusmods.com
+Then store your personal API key from nexusmods.com where dao-modman finds it:
+
+    mkdir -p ~/.config/dao-modman
+    echo 'NEXUS_API_TOKEN=...' > ~/.config/dao-modman/.env
+    chmod 600 ~/.config/dao-modman/.env
 
 The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`.
 Go to [Account Settings/API Keys](https://www.nexusmods.com/settings/api-keys) to create a token. 
@@ -57,20 +60,18 @@ The usual security recommendations apply. If this gets more than 10 users, the a
 
 To run the mod manager in UI mode, use:
 
-    uv run dao-modman                      # run the TUI
-
-Or run `dao-modman` from your .venv if, for some reason, you don't want to use `uv`.
+    dao-modman                             # run the TUI
 
 Most functionality is also exposed via a command line interface:
 
-    uv run dao-modman nxm 'nxm://...'      # hand a "Mod Manager Download" link to the TUI
-    uv run dao-modman install-nxm-handler  # register as nxm:// handler
-    uv run dao-modman laa status|restore|patch --exe PATH   # Large Address Aware patch
-    uv run dao-modman console status|enable|disable   # developer console, see below
-    uv run dao-modman revisions init       # keep a git history of the library's metadata
-    uv run dao-modman chargen              # check the merged character creator list
-    uv run dao-modman conflicts            # which mods ship the same files, and who wins
-    uv run dao-modman conflicts accept NAME ... | --all   # mark conflicts as intended
+    dao-modman nxm 'nxm://...'             # hand a "Mod Manager Download" link to the TUI
+    dao-modman install-nxm-handler         # register as nxm:// handler
+    dao-modman laa status|restore|patch --exe PATH   # Large Address Aware patch
+    dao-modman console status|enable|disable   # developer console
+    dao-modman revisions init              # keep a git history of the library's metadata
+    dao-modman chargen                     # check the merged character creator list
+    dao-modman conflicts                   # which mods ship the same files, and who wins
+    dao-modman conflicts accept NAME ... | --all   # mark conflicts as intended
 
 `.rar` archives need `unrar`, `7z` or `bsdtar` on PATH; they are tried in that order, since
 `bsdtar` cannot read solid archives. Some mods on Nexus are only available as `.rar`.
@@ -105,11 +106,11 @@ The bar at the bottom shows the everyday keys; `?` lists all of them.
 
 ## Usage
 
-See the [user and behind-the-scenes documentation](docs/Readme.md).
+See the [user and behind-the-scenes documentation](https://github.com/DrHarib0/dao-modman/blob/main/docs/Readme.md).
 
 ## License
 
-[MIT](LICENSE): free to use, change and pass on, as long as the copyright notice naming the author
+[MIT](https://github.com/DrHarib0/dao-modman/blob/main/LICENSE): free to use, change and pass on, as long as the copyright notice naming the author
 stays with it.
 
 ## Disclosure
@@ -124,6 +125,8 @@ have such a setup and want to help, open an issue and say what you run.
 Pull requests are welcome too. Please run the tests and the linter (see below) before sending one.
 
 ## Development
+
+To work from source, clone this repository and run `uv sync`; then start it with `uv run dao-modman`.
 
     uv run pytest                                  # tests
     uv run ruff check . && uv run ruff format .    # lint and format

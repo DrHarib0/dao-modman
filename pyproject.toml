@@ -1,12 +1,24 @@
 [project]
 name = "dao-modman"
-authors = [{ name = "Sebastian Mahr", email = "sebastian.e.mahr@gmail+github.com" }]
+authors = [{ name = "Sebastian Mahr" }]
 version = "0.1.0"
 description = "Terminal mod manager for Dragon Age: Origins"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
+keywords = ["dragon age", "dragon age origins", "mod manager", "modding", "nexus mods", "proton", "tui"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Games/Entertainment :: Role-Playing",
+]
 dependencies = [
     "textual>=1.0",
     "httpx2>=2.13",
@@ -15,6 +27,11 @@ dependencies = [
     "py7zr>=0.21",
     "pathspec>=0.12",
 ]
+
+[project.urls]
+Homepage = "https://github.com/DrHarib0/dao-modman"
+Documentation = "https://github.com/DrHarib0/dao-modman/blob/main/docs/Readme.md"
+Issues = "https://github.com/DrHarib0/dao-modman/issues"
 
 [project.scripts]
 dao-modman = "dao_modman.__main__:main"
@@ -25,6 +42,9 @@ dev = ["pytest>=8", "pytest-asyncio>=0.24", "ruff>=0.6", "textual-dev>=1.5"]
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.sdist]
+include = ["src", "tests", "docs", "README.md", "LICENSE"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/dao_modman"]
