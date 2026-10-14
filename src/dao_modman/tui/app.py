@@ -28,6 +28,7 @@ from ..core import (
     launch,
     moditems,
     pathops,
+    paths,
     presets,
     report,
     revisions,
@@ -138,6 +139,11 @@ KEYS = [
     ),
 ]
 SECTIONS = ("Mod list", "Mod contents", "Nexus", "Game", "App")
+
+
+def token_hint() -> str:
+    """Where to put the Nexus API token, with the real path of the config dir."""
+    return f"put NEXUS_API_TOKEN=... into {paths.config_dir() / '.env'}"
 
 
 def key_overview() -> list[tuple[str, list[tuple[str, str]]]]:
@@ -597,7 +603,7 @@ class ModManApp(App[None]):
 
     def action_add_nexus(self) -> None:
         if not self.nexus:
-            self.error("No Nexus API token: set NEXUS_API_TOKEN (see README)")
+            self.error(f"No Nexus API token: {token_hint()}")
             return
 
         def done(choice: tuple[int, int, NxmLink | None] | None) -> None:
@@ -616,7 +622,7 @@ class ModManApp(App[None]):
         if link.game != GAME:
             return f"that link is for {link.game!r}, not {GAME!r}"
         if not self.nexus:
-            return "no Nexus API token: set NEXUS_API_TOKEN (see README)"
+            return f"no Nexus API token: {token_hint()}"
         self.install(link.mod_id, link.file_id, link)
         return None
 
@@ -660,7 +666,7 @@ class ModManApp(App[None]):
     @work(exclusive=True, group="updates")
     async def action_check_updates(self) -> None:
         if not self.nexus:
-            self.error("No Nexus API token: set NEXUS_API_TOKEN (see README)")
+            self.error(f"No Nexus API token: {token_hint()}")
             return
         listings: dict[int, dict] = {}
         self.updates = set()

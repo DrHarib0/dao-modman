@@ -77,7 +77,9 @@ needed operations: when such a mod is installed it shows why and what, and asks 
 apply them. If you decline, or the mod was installed earlier, the path editor (`e`) shows a
 hint and `p` adds them there.
 
-The list is `src/dao_modman/assets/presets.toml`, keyed by Nexus mod id and file id:
+The list ships with dao-modman
+([assets/presets.toml](https://github.com/DrHarib0/dao-modman/blob/main/src/dao_modman/assets/presets.toml)),
+keyed by Nexus mod id and file id:
 
     [[preset]]
     mod_id = 1825
