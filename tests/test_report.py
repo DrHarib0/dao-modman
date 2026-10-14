@@ -173,7 +173,11 @@ def test_cli_accept_everything(
     monkeypatch.setattr(cli, "load_config", lambda: Config(dirs=clashing.dirs))
     # accepting everything must be asked for explicitly
     assert cli.main(["conflicts", "accept"]) == 2
-    assert cli.main(["conflicts", "accept", "--all", "sword.uti"]) == 2
+    try:
+        status = cli.main(["conflicts", "accept", "--all", "sword.uti"])
+    except SystemExit as exc:  # older argparse versions reject it themselves
+        status = exc.code
+    assert status == 2
     assert "--all" in capsys.readouterr().err
     assert {c.status for c in deploy.build_plan(Library(clashing.dirs)).conflicts} == {"open"}
 
