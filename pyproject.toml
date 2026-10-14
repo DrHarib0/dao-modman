@@ -1,8 +1,11 @@
 [project]
 name = "dao-modman"
+authors = [{ name = "Sebastian Mahr", email = "sebastian.e.mahr@gmail+github.com" }]
 version = "0.1.0"
-description = "Terminal mod manager for Dragon Age: Origins on Steam/Proton"
+description = "Terminal mod manager for Dragon Age: Origins"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = [
     "textual>=1.0",
