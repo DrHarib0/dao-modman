@@ -71,7 +71,6 @@ def test_load_config_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert cfg.dirs.downloads == tmp_path / "dl"
     assert cfg.dirs.data == tmp_path / "share" / paths.APP_NAME
     assert cfg.nexus_token == "tok"
-    assert cfg.presets_file == config_dir / "presets.toml"
     assert cfg.language == "en-us"
     assert cfg.max_texture_size == 4096
     assert "*.txt" in cfg.ignore and "*readme*" in cfg.ignore  # built-in list by default

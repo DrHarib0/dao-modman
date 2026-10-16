@@ -13,12 +13,11 @@ which on Steam/Proton is
     ~/.local/share/dao-modman/
       downloads/            # original archives, never modified
       mods/<id>/
-        mod.toml            # metadata: source, version, archive hash, path operations
+        mod.toml            # metadata: source, version, archive hash, path operations, options
         files/              # archive extracted as-is
       profile.toml          # load order, enabled flags, groups
       deployed.json         # what was written to the game dir (path + SHA-256)
     ~/.config/dao-modman/config.toml   # optional overrides, see below
-    ~/.config/dao-modman/presets.toml  # optional: your own predefined path operations
 
 `config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `game_app_id`,
 `data_dir`, `downloads_dir`, `terminal`, `ignore`, `language`, `max_texture_size`.
@@ -69,32 +68,6 @@ Paths are relative to the game user dir and matched case-insensitively.
 In the editor (`e`): `r` removes and `m` renames/moves the selected entry, `u` undoes the last
 operation. `←`/`→` fold and unfold a folder, `c` folds or unfolds everything, and `/` filters
 the tree to entries whose file or folder name contains the typed text (`esc` clears it).
-
-### Predefined path operations
-
-Some mods only work when installed at a specific place. For those, dao-modman knows the
-needed operations: when such a mod is installed it shows why and what, and asks whether to
-apply them. If you decline, or the mod was installed earlier, the path editor (`e`) shows a
-hint and `p` adds them there.
-
-The list ships with dao-modman
-([assets/presets.toml](https://github.com/DrHarib0/dao-modman/blob/main/src/dao_modman/assets/presets.toml)),
-keyed by Nexus mod id and file id:
-
-    [[preset]]
-    mod_id = 1825
-    file_id = 9280
-    description = "The bundled exe has hardcoded paths. For the mod to work, the exe needs to be placed in override/siramods_items"
-
-    [[preset.ops]]
-    op = "rename"
-    from = "{mod}/ADD_ITEM_DELUXE_1_1/siramods_items"
-    to = "packages/core/override/siramods_items"
-
-`{mod}` stands for the mod's own override folder, `packages/core/override/<mod-id>`, which
-differs from library to library. A `presets.toml` of the same format in
-`~/.config/dao-modman/` adds your own entries; an entry there replaces the shipped one for
-the same mod and file. Problems in that file are reported at startup and it is then ignored.
 
 ## Items
 
