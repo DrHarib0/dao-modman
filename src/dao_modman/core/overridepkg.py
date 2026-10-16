@@ -107,6 +107,8 @@ def parse_manifest(manifest: Path) -> Package:
         raise OverridePkgError(f"{manifest}: no OverrideItem")
 
     def text(tag: str) -> str:
+        # item can never be None; the closure is never called then
+        # noinspection unresolved-references
         return (item.findtext(tag) or "").strip()
 
     return Package(
@@ -161,9 +163,9 @@ def apply_options(
     """
     prefix = f"{root}/" if root else ""
     by_name: dict[str, list[str]] = {}  # file name -> targets of the package's files
-    for target, source in sorted(mapping.items()):
+    for dst, source in sorted(mapping.items()):
         if source.startswith(prefix):
-            by_name.setdefault(source.rpartition("/")[2].casefold(), []).append(target)
+            by_name.setdefault(source.rpartition("/")[2].casefold(), []).append(dst)
 
     variants = {value.file.casefold() for key in keys for value in key.values}
     result = {
