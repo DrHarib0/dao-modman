@@ -3,7 +3,8 @@
 The Steam launcher starts the game through `data/DAOriginsLauncher.xml`, so the
 `-enabledeveloperconsole` switch has to be added to the launch entry there. The console is
 opened with the key bound to `OpenConsole_0` in the user dir's `Settings/KeyBindings.ini`.
-What is typed stays invisible unless the game has a `packages/core/data/fonts.erf`.
+What is typed stays invisible unless the game has a `fonts.erf`, in `packages/core/data` or
+anywhere in the override folder.
 """
 
 from __future__ import annotations
@@ -18,7 +19,8 @@ from .paths import resolve_case
 
 LAUNCHER_REL = "data/DAOriginsLauncher.xml"
 KEYBINDINGS_REL = "Settings/KeyBindings.ini"
-FONTS_REL = "packages/core/data/fonts.erf"
+FONTS_NAME = "fonts.erf"
+FONTS_DIRS = ("packages/core/data", "packages/core/override")  # override: with subfolders
 BACKUP_SUFFIX = ".pre-console"
 SWITCH = "-enabledeveloperconsole"
 DEFAULT_KEY = "Keyboard::Button_Grave"
@@ -123,4 +125,11 @@ def fonts_installed(user_dir: Path | None, library: Library) -> bool:
     """True if console text will be visible: fonts.erf is in place or its mod is installed."""
     if any(mod.nexus and mod.nexus.mod_id == FONTS_MOD_ID for mod in library.mods.values()):
         return True
-    return user_dir is not None and resolve_case(user_dir, FONTS_REL).is_file()
+    if user_dir is None:
+        return False
+    data, override = (resolve_case(user_dir, rel) for rel in FONTS_DIRS)
+    candidates = [
+        *(data.iterdir() if data.is_dir() else []),
+        *(override.rglob("*") if override.is_dir() else []),
+    ]
+    return any(path.name.casefold() == FONTS_NAME and path.is_file() for path in candidates)

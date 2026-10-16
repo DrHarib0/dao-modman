@@ -114,6 +114,13 @@ def test_fonts_installed(tmp_path: Path, user_dir: Path, library: Library) -> No
     (user_dir / "Packages/Core/Data/fonts.erf").write_bytes(b"erf")
     assert console.fonts_installed(user_dir, library)
 
+    # the game reads it from the override folder too, at any depth
+    (user_dir / "Packages/Core/Data/fonts.erf").unlink()
+    assert not console.fonts_installed(user_dir, library)
+    (user_dir / "packages/core/override/some-mod").mkdir(parents=True)
+    (user_dir / "packages/core/override/some-mod/Fonts.erf").write_bytes(b"erf")
+    assert console.fonts_installed(user_dir, library)
+
 
 def test_cli(
     tmp_path: Path,

@@ -312,11 +312,11 @@ describes for the Steam release:
 - The console opens with the key bound to `OpenConsole_0` in `Settings/KeyBindings.ini`
   (grave by default). If no key is assigned there, grave is bound.
 
-What you type is invisible unless the game has a `packages/core/data/fonts.erf`. If it is
-missing, the tool offers to open the Nexus page of
-[Make CONSOLE commands visible](https://www.nexusmods.com/dragonage/mods/1110). When that mod
-is installed through dao-modman, it offers the predefined path operation that routes its
-`fonts.erf` to `packages/core/data/`.
+What you type is invisible unless the game has a `fonts.erf`, from
+[Make CONSOLE commands visible](https://www.nexusmods.com/dragonage/mods/1110). If neither that
+mod nor a `fonts.erf` in `packages/core/data` or the override folder is found, the tool offers
+to open the mod's Nexus page. Installed like any other mod, its `fonts.erf` works from the
+mod's own override folder.
 
 ## Further reading
 
