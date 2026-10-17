@@ -851,7 +851,9 @@ class ModManApp(App[None]):
             f"\n{target.rpartition('/')[2]} merged from {len(mods)} mods"
             for target, mods in plan.merged.items()
         ]
-        if plan.addins:
+        if len(plan.addins) > 5:
+            lines.append(f"\n{len(plan.addins)} AddIns")
+        elif plan.addins:
             lines.append(f"\nAddIns: {', '.join(addin.name for addin in plan.addins)}")
         if conflicts := plan.conflicts:
             lines.append(f"\n{len(conflicts)} file(s) overwritten by a later mod (v shows them)")

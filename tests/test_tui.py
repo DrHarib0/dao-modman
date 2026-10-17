@@ -27,7 +27,7 @@ from dao_modman.tui.screens import (
     ProgressScreen,
 )
 
-from .conftest import make_zip
+from .conftest import make_dazip, make_zip
 from .gamefiles import make_tlk, make_uti
 
 OVERRIDE = "packages/core/override"
@@ -1298,6 +1298,9 @@ async def test_apply_confirmation_fits_a_small_terminal(
         if index < 2:
             files["chargenmorphcfg.xml"] = "<morph_config><hairs/></morph_config>"
         library.import_archive(make_zip(tmp_path / f"Mod {index:02}.zip", files))
+    for index in range(6):
+        archive = make_dazip(tmp_path / f"a{index}.dazip", f"addin{index}", f"AddIn {index}")
+        library.import_archive(archive)
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.press("a")
@@ -1305,6 +1308,7 @@ async def test_apply_confirmation_fits_a_small_terminal(
         message = app.screen.message
         assert "55 file(s) overwritten by a later mod (v shows them)" in message
         assert "chargenmorphcfg.xml merged from 2 mods" in message
+        assert "\n6 AddIns" in message and "AddIn 0" not in message
         assert "Mod 01" not in message and ".gda" not in message  # no details
         await pilot.press("n")
 
