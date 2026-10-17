@@ -842,11 +842,13 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
 
     @on(Input.Changed, "#filter")
     def filter_changed(self, event: Input.Changed) -> None:
+        event.stop()  # the mod list's filter box has the same id: its handler must not see this
         self.filter = event.value.strip().casefold()
         self.rebuild()
 
     @on(Input.Submitted, "#filter")
-    def filter_done(self) -> None:
+    def filter_done(self, event: Input.Submitted) -> None:
+        event.stop()
         self.query_one("#targets").focus()
 
     def _selected(self) -> str | None:

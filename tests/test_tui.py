@@ -547,6 +547,7 @@ async def test_path_tree_folding_and_filter(tmp_path: Path, dirs: Dirs, user_dir
         assert files() == ["docs/img/Pic.dds"]
         await pilot.press("enter")
         assert tree.has_focus
+        assert app.filter_text == ""  # the mod list behind the dialog is not filtered
 
         # excluding works on the filtered tree
         await go("docs/img/Pic.dds")
