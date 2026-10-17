@@ -7,7 +7,7 @@ from fnmatch import fnmatchcase
 from pathlib import Path
 
 from . import chargen, resources
-from .deploy import ACCEPTED, ERROR, OPEN, Conflict, Plan
+from .deploy import ACCEPTED, ERROR, OPEN, UNMANAGED, Conflict, Plan
 from .library import Library
 from .models import Overwrite
 
@@ -15,6 +15,7 @@ USED = "\u2190 used"
 ACCEPTED_MARK = "\u2713 accepted"
 ERROR_MARK = "\u2717 wrong order"
 UNUSED_TITLE = "Unused overwrite rules (the other mod is not in the library)"
+UNMANAGED_NAME = "not managed by dao-modman"
 
 
 @dataclass
@@ -26,13 +27,20 @@ class Group:
 
     @property
     def title(self) -> str:
-        return "  <  ".join(f"#{position} {name}" for position, name in self.mods)
+        return "  <  ".join(_label(position, name) for position, name in self.mods)
 
 
 def _labels(library: Library) -> dict[str, tuple[int, str]]:
-    return {
+    """Load order position and name of every mod; files we do not manage come after all."""
+    labels = {
         entry.id: (position, mod.name) for position, (entry, mod) in enumerate(library.ordered(), 1)
     }
+    labels[UNMANAGED] = (len(labels) + 1, UNMANAGED_NAME)
+    return labels
+
+
+def _label(position: int, name: str) -> str:
+    return name if name == UNMANAGED_NAME else f"#{position} {name}"
 
 
 _RANK = {ERROR: 0, OPEN: 1, ACCEPTED: 2}
@@ -76,7 +84,7 @@ def file_line(library: Library, conflict: Conflict) -> str:
         labels = _labels(library)
 
         def label(mod_id: str) -> str:
-            return f"#{labels[mod_id][0]} {labels[mod_id][1]}"
+            return _label(*labels[mod_id])
 
         problems = "; ".join(
             f"{label(early)} is set to overwrite {label(late)} but loads before it"
@@ -91,7 +99,7 @@ def select_conflicts(plan: Plan, names: list[str]) -> tuple[list[Conflict], list
 
     Returns `(conflicts, names that matched nothing)`.
     """
-    candidates = plan.with_status(OPEN)
+    candidates = [c for c in plan.with_status(OPEN) if UNMANAGED not in c.mod_ids]
     if not names:
         return candidates, []
     selected: list[Conflict] = []
@@ -114,7 +122,7 @@ def select_conflicts(plan: Plan, names: list[str]) -> tuple[list[Conflict], list
 def provider_lines(library: Library, conflict: Conflict) -> list[str]:
     """One line per copy of the file: mod and folder, the winner's copies marked."""
     labels = _labels(library)
-    names = [f"#{labels[p.mod_id][0]} {labels[p.mod_id][1]}" for p in conflict.providers]
+    names = [_label(*labels[p.mod_id]) for p in conflict.providers]
     width = max(map(len, names))
     lines = []
     for name, provider in zip(names, conflict.providers, strict=True):

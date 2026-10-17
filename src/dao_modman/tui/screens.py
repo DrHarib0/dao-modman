@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from rich.markup import escape
 from textual import on, work
 from textual.app import ComposeResult
@@ -475,9 +477,15 @@ class ConflictsScreen(ModalScreen[None]):
         Binding("escape,q,v", "close", "Close"),
     ]
 
-    def __init__(self, library: Library, mod: Mod | None = None) -> None:
+    def __init__(
+        self,
+        library: Library,
+        mod: Mod | None = None,
+        foreign: list[tuple[str, Path]] | None = None,
+    ) -> None:
         super().__init__()
         self.library = library
+        self.foreign = foreign  # files in the mod directories that are not managed
         self.mod_id = mod.id if mod else None  # only what involves this mod; None: everything
         self.title_text = f"Conflicts of {mod.name}" if mod else "Conflicts"
 
@@ -498,7 +506,7 @@ class ConflictsScreen(ModalScreen[None]):
         tree.focus()
 
     def rebuild(self, select: str | None = None) -> None:
-        plan = deploy.build_plan(self.library)
+        plan = deploy.build_plan(self.library, self.foreign)
         tree = self.query_one("#conflicts", PathTree)
         tree.clear()
         nodes = {}
@@ -538,6 +546,9 @@ class ConflictsScreen(ModalScreen[None]):
             self.rebuild(select=report.UNUSED_TITLE)
             return
         conflicts = item.conflicts if kind == "group" else [item]
+        if deploy.UNMANAGED in conflicts[0].mod_ids:
+            self.notify("Not managed by dao-modman: adopt it (t) to decide", severity="warning")
+            return
         *losers, winner = conflicts[0].mod_ids
         if any(conflict.status == deploy.ERROR for conflict in conflicts):
             self.notify("Wrong order: move the mods, then accept", severity="warning")

@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from dao_modman.core import deploy
+from dao_modman.core import deploy, report
 from dao_modman.core.library import Library
 from dao_modman.core.models import PathOp
 
@@ -523,3 +523,27 @@ def test_scan_and_clean_the_mod_directories(
     assert (user_dir / OVERRIDE).is_dir() and not (user_dir / "packages/core/data").exists()
     assert (outside / "precious.txt").read_text() == "not ours to delete"  # link not followed
     assert not deploy.scan(user_dir, deployed, install_dir)
+
+
+def test_foreign_files_show_up_in_conflicts(
+    tmp_path: Path, library: Library, user_dir: Path
+) -> None:
+    library.import_archive(make_zip(tmp_path / "hair.zip", {"hair.mmh": "mine", "same.erf": "s"}))
+    (user_dir / OVERRIDE / "hand").mkdir(parents=True)
+    (user_dir / OVERRIDE / "hand/HAIR.MMH").write_text("by hand")  # same name, other folder
+    (user_dir / OVERRIDE / "hand/same.erf").write_text("s")  # same content: no clash
+    (user_dir / OVERRIDE / "hand/other.erf").write_text("o")  # no counterpart
+    foreign = deploy.unmanaged(user_dir, library.dirs.deployed_file)
+    assert deploy.build_plan(library).conflicts == []  # without them, nothing to report
+
+    plan = deploy.build_plan(library, foreign)
+    assert [(c.name, c.mod_ids, c.status) for c in plan.conflicts] == [
+        ("HAIR.MMH", ["hair", deploy.UNMANAGED], deploy.OPEN)  # theirs is listed last: it stays
+    ]
+    assert {f.mod_id for f in plan.files} == {"hair"}  # foreign files are never deployed
+    assert plan.conflicting_mods() == {"hair", deploy.UNMANAGED}
+
+    text = report.format_conflicts(library, plan)
+    assert "#1 hair  <  not managed by dao-modman   (1 file)" in text
+    assert f"not managed by dao-modman   {OVERRIDE}/hand/" in text
+    assert report.select_conflicts(plan, []) == ([], [])  # cannot be accepted

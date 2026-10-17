@@ -145,8 +145,15 @@ def cmd_console(action: str) -> int:
 
 
 def cmd_conflicts(action: str | None, names: list[str], accept_all: bool) -> int:
-    library = _library(load_config())
-    plan = deploy.build_plan(library)
+    config = load_config()
+    library = _library(config)
+    user_dir = config.game_user_dir
+    foreign = (
+        deploy.unmanaged(user_dir, config.dirs.deployed_file, config.game_install_dir)
+        if user_dir and user_dir.is_dir()
+        else None
+    )
+    plan = deploy.build_plan(library, foreign)
     if action is None:
         print(report.format_conflicts(library, plan) or "no conflicts")
         return 1 if plan.with_status(deploy.ERROR) else 0

@@ -207,6 +207,10 @@ with its folder, and the one the game gets is marked:
         #4 Dain's Fixes   packages/core/override/Dains Fixes/2. Tweaks/Blood Control/
         #5 Extras         packages/core/override/Dains Fixes/6. Extras/Blood Control damage on resist/   ← used
 
+Files in the mod directories that dao-modman did not install take part too, as "not managed
+by dao-modman", listed last: apply never replaces them. Such conflicts cannot be accepted;
+adopt the files (see below) to put them in the load order.
+
 ### Accepted overwrites
 
 Some conflicts are intended: one mod is meant to replace files of another. The winning mod
@@ -234,6 +238,35 @@ To set it:
 A rule is kept when the mod it names is removed, since removal is often temporary. It then
 does nothing, and is listed in the report as an unused rule so that it does not come back
 unnoticed when the mod is installed again; `a` on it in the dialog drops it.
+
+## Taking over an existing installation
+
+If the game was modded before dao-modman, the mod directories (`packages/` and `AddIns/` in the
+user dir) hold files it does not manage. dao-modman says so at startup, never overwrites
+them (apply names the files it left alone), and lists them in the conflict report.
+
+"Adopt files not managed by dao-modman" in the Tools menu (`t`) takes them into the library:
+
+- each folder in `packages/core/override/` becomes one mod of loose override files, named
+  after the folder; the files directly in `override/` one more. If the folder is not named
+  like the mod's id, a rename path operation (`e`) keeps the files in their folder;
+- each `AddIns/<uid>/` folder becomes one mod. If the AddIn is registered in
+  `Settings/AddIns.xml`, it becomes a dazip, named after the AddIn's title, and apply
+  registers it again;
+- anything else below `packages/` becomes one mod "Other packages files". This one, and
+  AddIn folders that are not registered, become override packages: the only layout that
+  places files outside the override folder.
+
+Every group is packed into `downloads/adopted-<name>.zip` and imported like any archive; its
+files deploy to exactly where they were. The new mods go to the end of the load order, so
+they keep winning wherever they did before. Only when every group is imported and every
+library copy matches its original are the originals removed and the AddIns unregistered; if
+anything fails, the new mods are removed again and the game dir is left as it was. The game
+then lacks those files until the next apply, which the TUI offers right away.
+
+Symbolic links and ignored files (`Thumbs.db` ...) are left where they are. Official DLC is
+never touched. `AddIns.xml` does not record which AddIns came from one dazip, so a mod made
+of several AddIns, like The Winter Forge, becomes several mods.
 
 ## Library revisions
 

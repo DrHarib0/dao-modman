@@ -20,6 +20,7 @@ from textual.widgets import DataTable, Footer, Header, Input, Label, ProgressBar
 
 from ..core import (
     addins,
+    adopt,
     console,
     deploy,
     ipc,
@@ -190,6 +191,7 @@ class ModManApp(App[None]):
         )
         self.account: dict | None = None
         self.updates: set[str] = set()
+        self.foreign: list[tuple[str, Path]] = []  # files in the mod dirs we do not manage
         self.filter_text = ""  # only rows whose name or group contains it are shown
         self._row_ids: list[str | None] = []  # the mod of each table row; None: official DLC
         self._busy = False  # a long operation is running behind a progress dialog
@@ -225,6 +227,15 @@ class ModManApp(App[None]):
                 )
         except (deploy.DeployError, OSError, ValueError) as exc:
             self.error(exc)
+        self.refresh_foreign()  # after the rollback: an unfinished apply's files are not foreign
+        if self.foreign:
+            self.refresh_table()
+            self.notify(
+                f"{len(self.foreign)} file(s) in the mod directories are not managed by"
+                " dao-modman: t → Adopt takes them over",
+                timeout=10,
+                markup=False,
+            )
         if self.nexus:
             self.load_account()
         await self.listen()
@@ -305,7 +316,7 @@ class ModManApp(App[None]):
         table = self.query_one("#mods", DataTable)
         selected = select or (entry.id if (entry := self.current_entry()) else None)
         try:
-            plan = deploy.build_plan(self.library)
+            plan = deploy.build_plan(self.library, self.foreign)
             conflicting, misordered = plan.conflicting_mods(), plan.misordered_mods()
         except (pathops.PathOpError, OSError) as exc:
             conflicting, misordered = set(), set()
@@ -689,12 +700,14 @@ class ModManApp(App[None]):
     def show_conflicts(self, mod: Mod | None = None) -> None:
         """The conflict report: for one mod, or for the whole library."""
         try:
-            plan = deploy.build_plan(self.library)
+            plan = deploy.build_plan(self.library, self.foreign)
         except (pathops.PathOpError, MetadataError, OSError) as exc:
             self.error(exc)
             return
         if report.has_conflicts(self.library, plan, mod.id if mod else None):
-            self.push_screen(ConflictsScreen(self.library, mod), lambda _: self.refresh_table())
+            self.push_screen(
+                ConflictsScreen(self.library, mod, self.foreign), lambda _: self.refresh_table()
+            )
         elif mod:
             self.notify(f"{mod.name} has no conflicts", markup=False)
         else:
@@ -705,8 +718,9 @@ class ModManApp(App[None]):
         if not user_dir:
             self.error("Game user dir not found: set game_user_dir in config.toml")
             return
+        self.refresh_foreign()
         try:
-            plan = deploy.build_plan(self.library)
+            plan = deploy.build_plan(self.library, self.foreign)
         except (pathops.PathOpError, MetadataError, OSError) as exc:
             self.error(exc)
             return
@@ -788,9 +802,16 @@ class ModManApp(App[None]):
             self.refresh_status()
         revisions.snapshot(self.config.dirs.data, f"apply: {result.written} files")
         message = f"Applied {result.written} file(s)"
+        self.refresh_foreign()
+        self.refresh_table()
         if result.skipped:
-            message += f", left {len(result.skipped)} existing file(s) untouched"
-        self.notify(message)
+            names = ", ".join(path.rpartition("/")[2] for path in result.skipped[:4])
+            more = ", …" if len(result.skipped) > 4 else ""
+            message += (
+                f", left {len(result.skipped)} existing file(s) untouched: {names}{more}"
+                " (t → Adopt takes them over)"
+            )
+        self.notify(message, markup=False)
         for text in (note, reduced.note()):
             if text:
                 self.notify(text, markup=False)
@@ -867,6 +888,7 @@ class ModManApp(App[None]):
             self.error(exc)
             return
         finally:
+            self.refresh_foreign()
             self.refresh_table()
         revisions.snapshot(self.config.dirs.data, f"unapply{' and clean' if clean else ''}")
         message = f"Removed {result.removed} applied file(s)"
@@ -908,6 +930,7 @@ class ModManApp(App[None]):
         current = textures.LIMITS.get(limit, f"{limit} px")
         tools.append(("texture_size", f"Limit the size of textures - currently {current}"))
         tools.append(("conflicts", "Show all conflicts"))
+        tools.append(("adopt", "Adopt files not managed by dao-modman"))
         try:
             console_on = bool(install_dir) and console.is_enabled(install_dir)
         except console.ConsoleError:
@@ -926,12 +949,65 @@ class ModManApp(App[None]):
                 self.choose_texture_size()
             elif tool == "conflicts":
                 self.show_conflicts()
+            elif tool == "adopt":
+                self.start_adopt()
             elif tool == "laa_patch":
                 self.patch_laa()
             elif tool:
                 self.run_tool(tool)
 
         self.push_screen(ChoiceScreen("Tools", tools), done)
+
+    def refresh_foreign(self) -> None:
+        """Look for files in the mod directories that dao-modman does not manage."""
+        user_dir = self.config.game_user_dir
+        if not user_dir or not user_dir.is_dir():
+            self.foreign = []
+            return
+        try:
+            self.foreign = deploy.unmanaged(
+                user_dir, self.config.dirs.deployed_file, self.config.game_install_dir
+            )
+        except (deploy.DeployError, addins.AddInsError, OSError) as exc:
+            self.foreign = []
+            self.error(exc)
+
+    @work(exclusive=True, group="adopt")
+    async def start_adopt(self) -> None:
+        """Take the files we do not manage into the library, then offer to apply."""
+        user_dir = self.config.game_user_dir
+        if not user_dir or not user_dir.is_dir():
+            self.error("Game user dir not found: set game_user_dir in config.toml")
+            return
+        try:
+            found = adopt.find(
+                self.library, user_dir, self.config.dirs.deployed_file, self.config.game_install_dir
+            )
+        except (deploy.DeployError, addins.AddInsError, OSError) as exc:
+            self.error(exc)
+            return
+        if not found.groups:
+            self.notify("Every file in the mod directories is managed by dao-modman")
+            return
+        if not await self.push_screen_wait(ConfirmScreen(adopt.describe(found) + "\n\nAdopt?")):
+            return
+        try:
+            result = await self.run_with_progress(
+                "Adopting", adopt.adopt, self.library, user_dir, found
+            )
+        except (adopt.AdoptError, addins.AddInsError, OSError) as exc:
+            self.error(exc)
+            return
+        finally:
+            self.refresh_foreign()
+            self.refresh_table()
+        self.notify(f"Adopted {len(result.mods)} mod(s), {result.removed} file(s)", markup=False)
+        message = (
+            "The adopted files are now in the library, and no longer in the game.\n\n"
+            "Apply now to install them again?"
+        )
+        if await self.push_screen_wait(ConfirmScreen(message)):
+            self.action_apply()
 
     def choose_texture_size(self) -> None:
         """Set the longest side a deployed texture may have; kept in config.toml."""

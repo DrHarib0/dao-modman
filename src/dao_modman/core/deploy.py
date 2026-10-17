@@ -38,6 +38,8 @@ Progress = Callable[[str, int, int], None]
 
 
 MERGED = "(merged)"
+# a file in the mod directories that dao-modman did not install: it shows up in conflicts
+UNMANAGED = "(not managed)"
 
 
 @dataclass
@@ -185,7 +187,14 @@ def _identical(items: list[PlannedFile]) -> bool:
     return len(digests) == 1
 
 
-def build_plan(library: Library) -> Plan:
+def build_plan(library: Library, foreign: list[tuple[str, Path]] | None = None) -> Plan:
+    """What applying would deploy, and which files clash.
+
+    `foreign` are the files in the mod directories that dao-modman does not manage (see
+    `unmanaged`). They are never deployed or replaced, but a mod file with the same path or
+    override name clashes with them, and they win: apply never overwrites a file it did not
+    write, and which of two same-named override files the game uses is not up to us.
+    """
     plan = Plan()
     candidates: dict[tuple[str, ...], list[PlannedFile]] = {}
     chargens: dict[str, list[PlannedFile]] = {}
@@ -206,10 +215,16 @@ def build_plan(library: Library) -> Plan:
                 key = (scope[0].casefold(), scope[1].casefold())
             candidates.setdefault(key, []).append(planned)
         plan.addins += library.addins(mod, targets)
+    for rel, path in foreign or []:
+        planned = PlannedFile(normalize_rel(rel), path, UNMANAGED)
+        scope = _override_scope(planned.target)
+        key = (planned.target.casefold(),) if scope is None else tuple(map(str.casefold, scope))
+        if key in candidates and not path.is_symlink():
+            candidates[key].append(planned)
 
     for items in candidates.values():
         # Only the last mod's files are deployed; duplicates inside one mod are its business.
-        winner = items[-1]
+        winner = [item for item in items if item.mod_id != UNMANAGED][-1]
         plan.files += [item for item in items if item.mod_id == winner.mod_id]
         if len(_mod_ids(items)) > 1 and not _identical(items):
             plan.conflicts.append(_conflict(items))
@@ -237,6 +252,8 @@ def build_plan(library: Library) -> Plan:
     plan.files.sort(key=lambda planned: planned.target.casefold())
     plan.conflicts.sort(key=lambda conflict: conflict.name.casefold())
     for conflict in plan.conflicts:
+        if UNMANAGED in conflict.mod_ids:
+            continue  # stays open: there is nothing to declare about a file we do not manage
         _classify(conflict, library.mods)
     return plan
 

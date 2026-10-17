@@ -21,6 +21,7 @@ have moved on from Windows to Linux since then like the author did, the goal of 
 - Nexus Integration: Download mods from [nexusmods](https://www.nexusmods.com/games/dragonage)
 - Archive formats: `.dazip`, `.override`, `.zip`, `.7z` and `.rar`, also nested
 - Conflict Detection and Resolving
+- Adopt: take over a game that was modded by hand or with another tool
 - Mod Ordering: no more prefixes for mod directories - load order is defined in the manager
 - Mix and Match: pick which parts of a mod you want, in the UI. This selection persists if you disable a mod and reenable it later
 - Setup: to get the game running smoothly, `dao-modman` handles the technical stuff:

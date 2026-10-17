@@ -229,7 +229,7 @@ async def test_tools_menu_laa_patch_and_restore(
     app.open_url = lambda url, **_: opened.append(url)
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 6
+        assert app.screen.query_one(OptionList).option_count == 7
         await pilot.press("enter")  # first entry: apply the patch
         await pilot.pause()
         assert opened == [laa.GUIDE_URL]
@@ -245,7 +245,7 @@ async def test_tools_menu_laa_patch_and_restore(
         assert laa.is_laa(exe)
 
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 5  # the patch entry is gone
+        assert app.screen.query_one(OptionList).option_count == 6  # the patch entry is gone
         await pilot.press("enter")
         await pilot.pause()
         assert not laa.is_laa(exe)
@@ -1288,3 +1288,67 @@ async def test_all_conflicts_tool_without_conflicts(
         await pilot.press(*["down"] * labels.index("Show all conflicts"), "enter")
         await pilot.pause()
         assert [n.message for n in app._notifications][-1] == "No conflicts"
+
+
+def choose_tool(app: ModManApp, tool: str) -> None:
+    """Highlight a tools menu entry by its id."""
+    ids = [key for key, _label in app.screen.choices]
+    app.screen.query_one(OptionList).highlighted = ids.index(tool)
+
+
+async def test_adopt_files_installed_by_hand(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    hand = user_dir / OVERRIDE / "Hand Mod/hand.erf"
+    hand.parent.mkdir(parents=True)
+    hand.write_text("by hand")
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        assert any(
+            "1 file(s) in the mod directories are not managed" in n.message
+            for n in app._notifications
+        )
+        await pilot.press("t")
+        choose_tool(app, "adopt")
+        await pilot.press("enter")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        assert "Hand Mod (files, 1 file(s))" in app.screen.message
+        await pilot.press("y")
+        await until(
+            pilot,
+            lambda: isinstance(app.screen, ConfirmScreen) and "Apply now" in app.screen.message,
+        )
+        assert [mod.name for mod in app.library.mods.values()] == ["Hand Mod"]
+        assert not hand.exists() and app.foreign == []
+
+        await pilot.press("y")  # apply now: the usual apply dialog follows
+        await until(
+            pilot,
+            lambda: (
+                isinstance(app.screen, ConfirmScreen)
+                and app.screen.message.startswith("Apply 1 file")
+            ),
+        )
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        assert hand.read_text() == "by hand"
+
+
+async def test_apply_names_the_files_it_left_alone(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    library = Library(dirs)
+    library.import_archive(make_zip(tmp_path / "mine.zip", {"a.erf": "mine", "b.erf": "b"}))
+    taken = user_dir / OVERRIDE / "mine/a.erf"
+    taken.parent.mkdir(parents=True)
+    taken.write_text("by hand")
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        assert "conflict" in rows(app)[0][-1]  # the hand-installed copy clashes with ours
+        await pilot.press("a")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        assert any(
+            "left 1 existing file(s) untouched: a.erf (t → Adopt takes them over)" in n.message
+            for n in app._notifications
+        )
+    assert taken.read_text() == "by hand"
