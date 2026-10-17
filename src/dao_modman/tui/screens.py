@@ -10,8 +10,17 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Input, Label, OptionList, ProgressBar, Static, Tree
+from textual.widgets import (
+    Input,
+    Label,
+    OptionList,
+    ProgressBar,
+    SelectionList,
+    Static,
+    Tree,
+)
 from textual.widgets.option_list import Option
+from textual.widgets.selection_list import Selection
 
 from ..core import archive as archives
 from ..core import deploy, nexus, pathops, report
@@ -368,15 +377,21 @@ class OptionsScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
-class NexusAddScreen(ModalScreen[tuple[int, int, NxmLink | None] | None]):
-    """Pick a file of a Nexus mod. Result: `(mod_id, file_id, nxm link or None)`."""
+class NexusAddScreen(ModalScreen[tuple[int, list[int], NxmLink | None] | None]):
+    """Pick files of a Nexus mod. Result: `(mod_id, file_ids, nxm link or None)`."""
 
-    BINDINGS = [Binding("escape", "cancel", "Cancel")]
+    BINDINGS = [
+        Binding("escape", "cancel", "Cancel"),
+        Binding("enter", "confirm", "Look up / download", priority=True, show=False),
+    ]
 
-    def __init__(self, client: NexusClient, premium: bool) -> None:
+    def __init__(
+        self, client: NexusClient, premium: bool, installed: set[tuple[int, int]] | None = None
+    ) -> None:
         super().__init__()
         self.client = client
         self.premium = premium
+        self.installed = installed or set()  # (mod id, file id) already in the library
         self.mod_id: int | None = None
 
     def compose(self) -> ComposeResult:
@@ -384,20 +399,31 @@ class NexusAddScreen(ModalScreen[tuple[int, int, NxmLink | None] | None]):
             yield Label("Add mod from Nexus", classes="title")
             yield Input(placeholder="mod URL, mod id or nxm:// link")
             yield Static("", id="info", markup=False)
-            yield OptionList(id="files")
-            yield Label("[b]enter[/] look up / download   [b]esc[/] cancel", classes="hint")
+            yield SelectionList[int](id="files")
+            yield Label(
+                "[b]enter[/] look up / download   [b]space[/] select file   [b]esc[/] cancel",
+                classes="hint",
+            )
 
     def on_mount(self) -> None:
         self.query_one("#files").display = False
         if not self.premium:
             self.query_one("#info", Static).update(
-                "Free Nexus account: open the mod's Files tab in your browser, click "
-                '"Mod Manager Download" and paste the nxm:// link here.'
+                "Free Nexus account: look the mod up and select files to open their download"
+                " pages in the browser, or paste an nxm:// link."
             )
 
-    @on(Input.Submitted)
-    def submit(self, event: Input.Submitted) -> None:
-        self.lookup(event.value.strip())
+    def action_confirm(self) -> None:
+        box = self.query_one(Input)
+        if self.focused is box:
+            self.lookup(box.value.strip())
+            return
+        files = self.query_one("#files", SelectionList)
+        chosen = list(files.selected)
+        if not chosen and files.highlighted is not None:  # none checked: the highlighted one
+            chosen = [files.get_option_at_index(files.highlighted).value]
+        if self.mod_id is not None and chosen:
+            self.dismiss((self.mod_id, chosen, None))
 
     @work(exclusive=True)
     async def lookup(self, text: str) -> None:
@@ -407,7 +433,7 @@ class NexusAddScreen(ModalScreen[tuple[int, int, NxmLink | None] | None]):
                 link = nexus.parse_nxm(text)
                 if link.game != nexus.GAME:
                     raise NexusError(f"that link is for {link.game!r}, not {nexus.GAME!r}")
-                self.dismiss((link.mod_id, link.file_id, link))
+                self.dismiss((link.mod_id, [link.file_id], link))
                 return
             mod_id = nexus.parse_mod_ref(text)
             info.update("Looking up mod ...")
@@ -421,26 +447,26 @@ class NexusAddScreen(ModalScreen[tuple[int, int, NxmLink | None] | None]):
         ]
         files.sort(key=lambda f: f.get("uploaded_timestamp") or 0, reverse=True)
         self.mod_id = mod_id
-        hint = "" if self.premium else " - downloading needs an nxm:// link (free account)"
+        hint = "" if self.premium else " - selected files open in the browser (free account)"
         info.update(f"{mod_info.get('name', mod_id)}: {len(files)} file(s){hint}")
-        options = self.query_one("#files", OptionList)
+        installed = {file_id for owner, file_id in self.installed if owner == mod_id}
+        preselected = set(nexus.default_files(files)) - installed
+        options = self.query_one("#files", SelectionList)
         options.clear_options()
         for file in files:
+            file_id = int(file["file_id"])
             size_mb = (file.get("size_kb") or 0) / 1024
             label = (
                 f"{file.get('name', '?')}  v{file.get('version') or '?'}  "
                 f"[{file.get('category_name', '?')}]  {size_mb:.1f} MB"
             )
-            options.add_option(Option(escape(label), id=str(file["file_id"])))
+            if file_id in installed:
+                label += "  (installed)"
+            options.add_option(Selection(escape(label), file_id, file_id in preselected))
         options.display = True
         if files:
             options.highlighted = 0
             options.focus()
-
-    @on(OptionList.OptionSelected)
-    def select(self, event: OptionList.OptionSelected) -> None:
-        if self.mod_id is not None and event.option.id:
-            self.dismiss((self.mod_id, int(event.option.id), None))
 
     def action_cancel(self) -> None:
         self.dismiss(None)

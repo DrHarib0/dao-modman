@@ -229,3 +229,21 @@ async def test_link_to_nexus_by_md5(tmp_path: Path) -> None:
     assert (reloaded["known"].nexus.mod_id, reloaded["known"].nexus.file_id) == (7, 22)
     assert reloaded["known"].version == "3"
     assert reloaded["unknown"].nexus is None
+
+
+def test_default_files() -> None:
+    def file(file_id: int, category: str, primary: bool = False) -> dict:
+        return {"file_id": file_id, "category_name": category, "is_primary": primary}
+
+    assert nexus.default_files([file(1, "MAIN"), file(2, "OPTIONAL")]) == [1]
+    # several main files: only the author's primary one, if there is exactly one
+    assert nexus.default_files([file(1, "MAIN"), file(2, "MAIN", primary=True)]) == [2]
+    assert nexus.default_files([file(1, "MAIN"), file(2, "MAIN")]) == []
+    assert nexus.default_files([file(1, "OPTIONAL", primary=True)]) == []
+    assert nexus.default_files([]) == []
+
+
+def test_download_page() -> None:
+    assert nexus.download_page(5616, 1000008673) == (
+        "https://www.nexusmods.com/dragonage/mods/5616?tab=files&file_id=1000008673&nmm=1"
+    )

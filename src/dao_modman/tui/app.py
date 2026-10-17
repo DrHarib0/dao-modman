@@ -40,7 +40,15 @@ from ..core.install import install_from_nexus, link_to_nexus
 from ..core.library import Library, LibraryError
 from ..core.metadata import MetadataError
 from ..core.models import Mod, PathOp, ProfileEntry
-from ..core.nexus import GAME, NexusClient, NexusError, NxmLink, newest_file_id, parse_nxm
+from ..core.nexus import (
+    GAME,
+    NexusClient,
+    NexusError,
+    NxmLink,
+    download_page,
+    newest_file_id,
+    parse_nxm,
+)
 from .screens import (
     ChoiceScreen,
     ConfirmScreen,
@@ -617,12 +625,28 @@ class ModManApp(App[None]):
             self.error(f"No Nexus API token: {token_hint()}")
             return
 
-        def done(choice: tuple[int, int, NxmLink | None] | None) -> None:
-            if choice:
-                self.install(*choice)
-
         premium = bool(self.account and self.account.get("is_premium"))
-        self.push_screen(NexusAddScreen(self.nexus, premium), done)
+
+        def done(choice: tuple[int, list[int], NxmLink | None] | None) -> None:
+            if not choice:
+                return
+            mod_id, file_ids, link = choice
+            if link is not None or premium:
+                for file_id in file_ids:
+                    self.install(mod_id, file_id, link)
+                return
+            # free account: the website hands out the links, the nxm handler brings them back
+            for file_id in file_ids:
+                self.open_url(download_page(mod_id, file_id))
+            self.notify(
+                f'Opened {len(file_ids)} download page(s): click "Slow download" on each',
+                markup=False,
+            )
+
+        installed = {
+            (mod.nexus.mod_id, mod.nexus.file_id) for mod in self.library.mods.values() if mod.nexus
+        }
+        self.push_screen(NexusAddScreen(self.nexus, premium, installed), done)
 
     def receive_link(self, url: str) -> str | None:
         """Start downloading an nxm:// link. Returns an error message if it is unusable."""

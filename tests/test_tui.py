@@ -6,12 +6,12 @@ from pathlib import Path
 
 import httpx2
 import pytest
-from textual.widgets import DataTable, Input, Label, OptionList, Static, Tree
+from textual.widgets import DataTable, Input, Label, OptionList, SelectionList, Static, Tree
 
-from dao_modman.core import deploy
+from dao_modman.core import deploy, nexus
 from dao_modman.core.config import Config
 from dao_modman.core.library import Library
-from dao_modman.core.models import PathOp
+from dao_modman.core.models import NexusInfo, PathOp
 from dao_modman.core.paths import Dirs
 from dao_modman.tui.app import ModManApp
 from dao_modman.tui.screens import (
@@ -1389,3 +1389,94 @@ async def test_no_notice_for_ignored_files_only(tmp_path: Path, dirs: Dirs, user
     async with app.run_test(size=(140, 40)):
         assert app.foreign  # it is not ours ...
         assert not any("not managed" in n.message for n in app._notifications)  # ... but no notice
+
+
+def multi_file_handler(tmp_path: Path, premium: bool):
+    """Nexus mod 7 with a main file, an optional one and one that is already installed."""
+    listing = {
+        "files": [
+            {"file_id": 22, "file_name": "Main-7.zip", "name": "Main", "category_name": "MAIN"},
+            {"file_id": 23, "file_name": "Addon-7.zip", "name": "Addon",
+             "category_name": "OPTIONAL"},
+            {"file_id": 24, "file_name": "Extra-7.zip", "name": "Extra",
+             "category_name": "MISCELLANEOUS"},
+        ],
+        "file_updates": [],
+    }  # fmt: skip
+    payloads = {
+        file_id: make_zip(tmp_path / f"payload{file_id}.zip", {f"f{file_id}.erf": "x"})
+        for file_id in (22, 23)
+    }
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if request.url.host == "cdn.example":
+            return httpx2.Response(
+                200, content=payloads[int(path.strip("/").split(".")[0])].read_bytes()
+            )
+        if path.endswith("/users/validate.json"):
+            return httpx2.Response(200, json={"name": "seb", "is_premium": premium})
+        if path.endswith("/mods/7.json"):
+            return httpx2.Response(200, json={"mod_id": 7, "name": "My Mod"})
+        if path.endswith("/mods/7/files.json"):
+            return httpx2.Response(200, json=listing)
+        for file_id in payloads:
+            if path.endswith(f"/files/{file_id}/download_link.json"):
+                return httpx2.Response(200, json=[{"URI": f"https://cdn.example/{file_id}.zip"}])
+        return httpx2.Response(404, json={"message": "nope"})
+
+    return handler
+
+
+async def look_up_mod_7(app: ModManApp, pilot) -> SelectionList:
+    await app.workers.wait_for_complete()
+    await pilot.press("n")
+    app.screen.query_one(Input).value = "7"
+    await pilot.press("enter")
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+    return app.screen.query_one(SelectionList)
+
+
+async def test_add_several_files_from_nexus(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    library = Library(dirs)
+    library.import_archive(  # file 24 is in the library already
+        make_zip(tmp_path / "Extra-7.zip", {"e.erf": "e"}), nexus=NexusInfo("dragonage", 7, 24)
+    )
+    app = ModManApp(
+        Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret"),
+        transport=httpx2.MockTransport(multi_file_handler(tmp_path, premium=True)),
+    )
+    async with app.run_test(size=(140, 40)) as pilot:
+        files = await look_up_mod_7(app, pilot)
+        assert files.selected == [22]  # the only main file
+        labels = [str(files.get_option_at_index(i).prompt) for i in range(files.option_count)]
+        assert labels[2].endswith("(installed)")
+        files.highlighted = 1
+        await pilot.press("space")  # the optional one too
+        assert sorted(files.selected) == [22, 23]
+        await pilot.press("enter")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+    installed = {mod.nexus.file_id for mod in Library(dirs).mods.values() if mod.nexus is not None}
+    assert installed == {22, 23, 24}  # one library mod per file
+
+
+async def test_free_account_opens_download_pages(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    app = ModManApp(
+        Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret"),
+        transport=httpx2.MockTransport(multi_file_handler(tmp_path, premium=False)),
+    )
+    opened: list[str] = []
+    app.open_url = lambda url, **_: opened.append(url)
+    async with app.run_test(size=(140, 40)) as pilot:
+        files = await look_up_mod_7(app, pilot)
+        files.highlighted = 1
+        await pilot.press("space")
+        await pilot.press("enter")
+        await pilot.pause()
+        assert opened == [nexus.download_page(7, 22), nexus.download_page(7, 23)]
+        assert any("Opened 2 download page(s)" in n.message for n in app._notifications)
+    assert Library(dirs).mods == {}  # nothing downloaded directly

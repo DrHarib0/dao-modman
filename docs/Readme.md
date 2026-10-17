@@ -24,10 +24,14 @@ which on Steam/Proton is
 
 ## Nexus Mods
 
-Add a mod by URL or mod id, pick a file, and it is downloaded to `downloads/` and imported.
+Add a mod by URL or mod id (`n`), pick its files, and each is downloaded to `downloads/` and
+imported as a mod of its own. `space` selects files, `enter` downloads the selected ones (or
+the highlighted one if none is selected). If the mod has exactly one main file, it is
+selected already; files that are in the library already are marked "installed".
 Premium accounts download directly. Free accounts must use the "Mod Manager Download" button
-on the website (Nexus API restriction): paste the `nxm://` link into the add dialog or
-register dao-modman as the handler. Mod and file ids are stored in `mod.toml`, which enables
+on the website (Nexus API restriction): selected files open their download pages in the
+browser, where "Slow download" hands the link to dao-modman if it is registered as the
+handler; an `nxm://` link can also be pasted into the add dialog. Mod and file ids are stored in `mod.toml`, which enables
 update checks. A file that supersedes an installed one replaces it in place, so load order and
 path operations carry over. Manually imported archives are looked up on Nexus by MD5.
 

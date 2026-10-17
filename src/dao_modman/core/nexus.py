@@ -87,6 +87,22 @@ def newest_file_id(files: dict, file_id: int) -> int:
     return file_id
 
 
+MAIN_CATEGORY = "MAIN"
+
+
+def default_files(files: list[dict]) -> list[int]:
+    """The file ids to preselect: the only main file, else the only primary main file."""
+    main = [file for file in files if file.get("category_name") == MAIN_CATEGORY]
+    if len(main) > 1:
+        main = [file for file in main if file.get("is_primary")]
+    return [int(main[0]["file_id"])] if len(main) == 1 else []
+
+
+def download_page(mod_id: int, file_id: int) -> str:
+    """The website page whose "Slow download" hands an nxm:// link to the mod manager."""
+    return f"https://www.nexusmods.com/{GAME}/mods/{mod_id}?tab=files&file_id={file_id}&nmm=1"
+
+
 def nexus_info(mod_id: int, file: dict) -> NexusInfo:
     uploaded = file.get("uploaded_timestamp")
     return NexusInfo(
