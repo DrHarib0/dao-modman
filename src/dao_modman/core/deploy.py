@@ -17,7 +17,6 @@ from .archive import sha256_file
 from .dazip import AddIn
 from .library import Library
 from .metadata import write_atomic
-from .models import Mod
 from .paths import normalize_rel, resolve_case
 
 if TYPE_CHECKING:
@@ -65,11 +64,6 @@ class PlannedFile:
         return f"{self.mod_id}:{self.source}:{stat.st_size}:{stat.st_mtime_ns}"
 
 
-OPEN = "open"  # an ordinary conflict
-ACCEPTED = "accepted"  # the winner declares these overwrites as intended
-ERROR = "error"  # a declared overwrite does not happen, because of the load order
-
-
 @dataclass
 class Provider:
     """One mod's copies of a contested file."""
@@ -84,9 +78,6 @@ class Conflict:
 
     name: str  # the file name below an override dir, else the full target path
     providers: list[Provider]  # in load order: the last one wins
-    status: str = OPEN
-    # (declaring mod, other mod): declared to overwrite the other, but loads before it
-    misordered: list[tuple[str, str]] = field(default_factory=list)
 
     @property
     def mod_ids(self) -> list[str]:
@@ -106,21 +97,19 @@ class Plan:
     warnings: list[str] = field(default_factory=list)
     addins: list[AddIn] = field(default_factory=list)
 
-    def with_status(self, status: str) -> list[Conflict]:
-        return [conflict for conflict in self.conflicts if conflict.status == status]
+    def overwrites(self) -> dict[str, tuple[set[str], set[str]]]:
+        """Per mod in a conflict: `(mods it overwrites, mods that overwrite it)`.
 
-    def conflicting_mods(self) -> set[str]:
-        """Mods that take part in an open conflict."""
-        return {mod_id for conflict in self.with_status(OPEN) for mod_id in conflict.mod_ids}
-
-    def misordered_mods(self) -> set[str]:
-        """Mods whose declared overwrite is defeated by the load order."""
-        return {
-            mod_id
-            for conflict in self.with_status(ERROR)
-            for pair in conflict.misordered
-            for mod_id in pair
-        }
+        Files not managed by dao-modman always win; they appear as `UNMANAGED`.
+        """
+        result: dict[str, tuple[set[str], set[str]]] = {}
+        for conflict in self.conflicts:
+            *losers, winner = conflict.mod_ids
+            for loser in losers:
+                result.setdefault(loser, (set(), set()))[1].add(winner)
+                if winner != UNMANAGED:
+                    result.setdefault(winner, (set(), set()))[0].add(loser)
+        return result
 
 
 @dataclass
@@ -169,23 +158,6 @@ def _conflict(items: list[PlannedFile]) -> Conflict:
 
 
 _hashes: dict[tuple[Path, int, int], str] = {}
-
-
-def _classify(conflict: Conflict, mods: dict[str, Mod]) -> None:
-    """Set a conflict's status from the overwrites its mods declare."""
-    ids, name = conflict.mod_ids, conflict.name
-    conflict.misordered = [
-        (early, late)
-        for index, early in enumerate(ids)
-        for late in ids[index + 1 :]
-        if mods[early].may_overwrite(late, name)
-    ]
-    if conflict.misordered:
-        conflict.status = ERROR
-    elif all(mods[ids[-1]].may_overwrite(loser, name) for loser in ids[:-1]):
-        conflict.status = ACCEPTED
-    else:
-        conflict.status = OPEN
 
 
 def _identical(items: list[PlannedFile]) -> bool:
@@ -274,10 +246,6 @@ def build_plan(
 
     plan.files.sort(key=lambda planned: planned.target.casefold())
     plan.conflicts.sort(key=lambda conflict: conflict.name.casefold())
-    for conflict in plan.conflicts:
-        if UNMANAGED in conflict.mod_ids:
-            continue  # stays open: there is nothing to declare about a file we do not manage
-        _classify(conflict, library.mods)
     return plan
 
 

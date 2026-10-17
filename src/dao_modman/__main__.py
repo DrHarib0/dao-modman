@@ -144,7 +144,7 @@ def cmd_console(action: str) -> int:
     return 0
 
 
-def cmd_conflicts(action: str | None, names: list[str], accept_all: bool) -> int:
+def cmd_conflicts() -> int:
     config = load_config()
     library = _library(config)
     user_dir = config.game_user_dir
@@ -154,25 +154,7 @@ def cmd_conflicts(action: str | None, names: list[str], accept_all: bool) -> int
         else None
     )
     plan = deploy.build_plan(library, foreign)
-    if action is None:
-        print(report.format_conflicts(library, plan) or "no conflicts")
-        return 1 if plan.with_status(deploy.ERROR) else 0
-
-    if bool(names) == accept_all:
-        print("error: give file names or mod ids to accept, or --all (not both)", file=sys.stderr)
-        return 2
-    selected, unmatched = report.select_conflicts(plan, names)
-    if unmatched:
-        print(f"error: no open conflict matches {', '.join(unmatched)}", file=sys.stderr)
-        return 1
-    for conflict in selected:
-        *losers, winner = conflict.mod_ids
-        library.accept_overwrite(winner, losers, conflict.name)
-        print(f"accepted {conflict.name}: {winner} overwrites {', '.join(losers)}")
-    if not selected:
-        print("no open conflicts")
-    for conflict in plan.with_status(deploy.ERROR):
-        print(f"not accepted: {report.file_line(library, conflict)}")
+    print(report.format_conflicts(library, plan) or "no conflicts")
     return 0
 
 
@@ -207,14 +189,9 @@ def main(argv: list[str] | None = None) -> int:
     laa_cmd.add_argument("--exe", type=Path, help="LAA-patched executable to install (for patch)")
     console_cmd = commands.add_parser("console", help="enable the game's developer console")
     console_cmd.add_argument("action", choices=["status", "enable", "disable"])
-    conflicts = commands.add_parser(
-        "conflicts", help="report files that several mods ship, or accept them as intended"
+    commands.add_parser(
+        "conflicts", help="report files that several mods ship, and whose copy is used"
     )
-    conflicts.add_argument("action", nargs="?", choices=["accept"])
-    conflicts.add_argument(
-        "names", nargs="*", help="with accept: file names or mod ids of the conflicts to accept"
-    )
-    conflicts.add_argument("--all", action="store_true", help="with accept: every open conflict")
     revisions_cmd = commands.add_parser(
         "revisions", help="keep a history of the library's metadata in git (debugging aid)"
     )
@@ -231,7 +208,7 @@ def main(argv: list[str] | None = None) -> int:
     if args.command == "revisions":
         return cmd_revisions()
     if args.command == "conflicts":
-        return cmd_conflicts(args.action, args.names, args.all)
+        return cmd_conflicts()
     if args.command == "console":
         return cmd_console(args.action)
     if args.command == "laa":

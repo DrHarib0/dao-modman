@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from fnmatch import fnmatchcase
 
 KIND_DAZIP = "dazip"
 KIND_OVERRIDE = "override"
@@ -27,26 +26,6 @@ class PathOp:
 
     def describe(self) -> str:
         return f"{self.op} {self.path}"
-
-
-@dataclass
-class Overwrite:
-    """Declares that overwriting files of another mod is intended."""
-
-    mod: str  # id of the mod whose files may be overwritten
-    files: list[str] = field(default_factory=list)  # names or globs; empty: every file
-
-    def covers(self, mod_id: str, name: str) -> bool:
-        if mod_id != self.mod:
-            return False
-        if not self.files:
-            return True
-        candidates = {name.casefold(), name.rpartition("/")[2].casefold()}
-        return any(
-            pattern.casefold() in candidates
-            or any(fnmatchcase(candidate, pattern.casefold()) for candidate in candidates)
-            for pattern in self.files
-        )
 
 
 @dataclass
@@ -76,12 +55,8 @@ class Mod:
     nexus: NexusInfo | None = None
     addin_uids: list[str] = field(default_factory=list)
     ops: list[PathOp] = field(default_factory=list)
-    overwrites: list[Overwrite] = field(default_factory=list)
     # choices for an override package's options: "Section/Key" -> value label
     options: dict[str, str] = field(default_factory=dict)
-
-    def may_overwrite(self, mod_id: str, name: str) -> bool:
-        return any(overwrite.covers(mod_id, name) for overwrite in self.overwrites)
 
 
 @dataclass

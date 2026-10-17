@@ -225,47 +225,31 @@ off while another still lists its content. The command exits with status 1 when 
 
 ### Conflict report
 
+A conflict is one mod overwriting a file of another: when several enabled mods ship a file
+(the same path, or the same name below an override directory), the game gets the copy of
+the mod that loads last. The load order decides, nothing else:
+
+- to change which copy wins, move the mods (`J`/`K`);
+- to keep a single file of a mod out of the game, exclude it in the mod's file dialog (`e`),
+  and the other mod's copy is used.
+
+The `Notes` column of the mod list shows the direction: `overwrites <mod>` on the winner,
+`overwritten by <mod>` on the others (the number of mods, if several).
+
 `v` in the TUI shows the conflicts the selected mod takes part in; "Show all conflicts" in
 the Tools menu (`t`), or `dao-modman conflicts`, shows them for the whole library. The
-report lists every contested file grouped by the mods that ship it. Mods are shown in load order with the winner last; under each file is every copy
-with its folder, and the one the game gets is marked:
+report lists every contested file grouped by the mods that ship it. Mods are shown in load
+order with the winner last; under each file is every copy with its folder, and the one the
+game gets is marked:
 
     #4 Dain's Fixes  <  #5 Extras   (1 file)
       abi_bloodcontrol.gda
-        #4 Dain's Fixes   packages/core/override/Dains Fixes/2. Tweaks/Blood Control/
-        #5 Extras         packages/core/override/Dains Fixes/6. Extras/Blood Control damage on resist/   ← used
+        #4 Dain's Fixes   packages/core/override/dain-s-fixes/2. Tweaks/Blood Control/
+        #5 Extras         packages/core/override/extras/Blood Control damage on resist/   ← used
 
 Files in the mod directories that dao-modman did not install take part too, as "not managed
-by dao-modman", listed last: apply never replaces them. Such conflicts cannot be accepted;
-adopt the files (see below) to put them in the load order.
-
-### Accepted overwrites
-
-Some conflicts are intended: one mod is meant to replace files of another. The winning mod
-can declare that in its `mod.toml`:
-
-    [[overwrites]]
-    mod = "dain-s-fixes"              # id of the mod whose files may be overwritten
-    files = ["abi_coneofcold.gda"]    # names or globs, ignoring case; leave out for every file
-
-A conflict is **accepted** when the winner covers every other mod that ships the file; it
-then no longer shows as `conflict`. A mod with such rules shows `overwrites <mod>` in the
-`Notes` column (or the number of mods, if several). If the load order changes so that the declaring mod loads
-*before* the other one, the overwrite does not happen: the mods are marked `wrong order` in
-red, the report says so, and `dao-modman conflicts` exits with status 1.
-
-To set it:
-
-- In the conflict report (`v`, or the Tools menu), `a` on a file line accepts that file; on a mods line it
-  accepts everything between those mods, including clashes that appear later. `a` again
-  takes it back.
-- `dao-modman conflicts accept NAME ...` takes file names (globs allowed) or mod ids; a mod id
-  accepts every open conflict that mod takes part in. `dao-modman conflicts accept --all`
-  accepts every open conflict. Entries are written file by file.
-
-A rule is kept when the mod it names is removed, since removal is often temporary. It then
-does nothing, and is listed in the report as an unused rule so that it does not come back
-unnoticed when the mod is installed again; `a` on it in the dialog drops it.
+by dao-modman", listed last: apply never replaces them, so they always win (`overwritten by
+unmanaged files`). Adopt them (see below) to put them in the load order.
 
 ## Taking over an existing installation
 

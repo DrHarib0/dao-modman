@@ -41,7 +41,7 @@ def test_plan_priority_and_conflicts(tmp_path: Path, library: Library) -> None:
         f"{OVERRIDE}/high/X.ERF": "high",
     }
     assert by_target(plan) == {f"{OVERRIDE}/high/X.ERF": ["low", "high"]}
-    assert plan.conflicting_mods() == {"low", "high"}
+    assert plan.overwrites() == {"low": (set(), {"high"}), "high": ({"low"}, set())}
 
     library.profile.move("high", -1)
     winner = {f.target.casefold(): f.mod_id for f in deploy.build_plan(library).files}
@@ -257,7 +257,7 @@ def test_identical_files_are_not_a_conflict(tmp_path: Path, library: Library) ->
         f"{OVERRIDE}/extras/x/t.gda": ["base", "extras"],
         f"{OVERRIDE}/third/u.gda": ["extras", "third"],
     }
-    assert plan.conflicting_mods() == {"base", "extras", "third"}
+    assert set(plan.overwrites()) == {"base", "extras", "third"}
     # deployment is unchanged: one mod's copy per name, identical or not
     assert [f.target for f in plan.files if f.target.endswith("helper.gda")] == [
         f"{OVERRIDE}/extras/x/helper.gda"
@@ -294,71 +294,19 @@ def test_ignore_patterns_come_from_the_config(tmp_path: Path, dirs) -> None:
     assert sorted(Library(dirs, ignore=[]).targets(mod).values()) == sorted(files)
 
 
-def statuses(plan: deploy.Plan) -> dict[str, str]:
-    return {conflict.name: conflict.status for conflict in plan.conflicts}
-
-
-def test_accepted_overwrites_and_wrong_order(tmp_path: Path, library: Library) -> None:
-    from dao_modman.core.models import Overwrite
-
+def test_overwrites_follow_the_load_order(tmp_path: Path, library: Library) -> None:
     for name in ("base", "middle", "top"):
-        library.import_archive(
-            make_zip(tmp_path / f"{name}.zip", {"a.gda": name, "b.gda": name, "Tex.DDS": name})
-        )
-    top = library.mods["top"]
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", {"a.gda": name}))
+    library.import_archive(make_zip(tmp_path / "solo.zip", {"s.gda": "s"}))
 
-    plan = deploy.build_plan(library)
-    assert statuses(plan) == {"a.gda": "open", "b.gda": "open", "Tex.DDS": "open"}
-    assert plan.conflicting_mods() == {"base", "middle", "top"}
-
-    # one file, one of the two losers: not enough, "middle" is overwritten too
-    top.overwrites = [Overwrite("base", ["a.gda"])]
-    assert statuses(deploy.build_plan(library))["a.gda"] == "open"
-
-    # every loser covered: by name, by glob (case-insensitive) and for a whole mod
-    top.overwrites = [Overwrite("base", ["A.GDA", "*.dds"]), Overwrite("middle")]
-    plan = deploy.build_plan(library)
-    assert statuses(plan) == {"a.gda": "accepted", "b.gda": "open", "Tex.DDS": "accepted"}
-    assert plan.misordered_mods() == set()
-
-    # the load order changes: "top" no longer wins against "middle"
+    # only the last mod's copy is used: it overwrites all the others
+    assert deploy.build_plan(library).overwrites() == {
+        "base": (set(), {"top"}),
+        "middle": (set(), {"top"}),
+        "top": ({"base", "middle"}, set()),
+    }
     library.profile.move("top", -1)
-    plan = deploy.build_plan(library)
-    assert statuses(plan) == {"a.gda": "error", "b.gda": "error", "Tex.DDS": "error"}
-    assert {tuple(c.misordered) for c in plan.conflicts} == {(("top", "middle"),)}
-    assert plan.misordered_mods() == {"top", "middle"}
-    assert plan.conflicting_mods() == set()
-
-    # nothing to complain about once the other mod is off
-    library.profile.entry("middle").enabled = False
-    plan = deploy.build_plan(library)
-    assert statuses(plan) == {"a.gda": "accepted", "b.gda": "open", "Tex.DDS": "accepted"}
-
-
-def test_accept_and_remove_overwrite(tmp_path: Path, library: Library) -> None:
-    for name in ("base", "top"):
-        library.import_archive(make_zip(tmp_path / f"{name}.zip", {"a.gda": name, "b.gda": name}))
-
-    def stored() -> list[tuple[str, list[str]]]:
-        return [(o.mod, o.files) for o in Library(library.dirs).mods["top"].overwrites]
-
-    assert library.accept_overwrite("top", ["base"], "a.gda")
-    assert not library.accept_overwrite("top", ["base"], "A.GDA")  # already covered
-    assert library.accept_overwrite("top", ["base"], "b.gda")
-    assert stored() == [("base", ["a.gda", "b.gda"])]
-    assert statuses(deploy.build_plan(library)) == {"a.gda": "accepted", "b.gda": "accepted"}
-
-    assert library.remove_overwrite("top", ["base"], "a.gda")
-    assert stored() == [("base", ["b.gda"])]
-    assert library.remove_overwrite("top", ["base"], "b.gda")
-    assert stored() == []  # the entry is dropped, never turned into "every file"
-
-    assert library.accept_overwrite("top", ["base"])  # the whole mod
-    assert not library.accept_overwrite("top", ["base"], "a.gda")
-    assert stored() == [("base", [])]
-    assert not library.remove_overwrite("top", ["base"], "a.gda")  # cannot carve out one file
-    assert library.remove_overwrite("top", ["base"])
-    assert stored() == []
+    assert deploy.build_plan(library).overwrites()["middle"] == ({"base", "top"}, set())
 
 
 def test_failed_apply_is_rolled_back(
@@ -547,16 +495,15 @@ def test_foreign_files_show_up_in_conflicts(
     assert deploy.build_plan(library).conflicts == []  # without them, nothing to report
 
     plan = deploy.build_plan(library, foreign)
-    assert [(c.name, c.mod_ids, c.status) for c in plan.conflicts] == [
-        ("HAIR.MMH", ["hair", deploy.UNMANAGED], deploy.OPEN)  # theirs is listed last: it stays
+    assert [(c.name, c.mod_ids) for c in plan.conflicts] == [
+        ("HAIR.MMH", ["hair", deploy.UNMANAGED])  # theirs is listed last: it stays
     ]
     assert {f.mod_id for f in plan.files} == {"hair"}  # foreign files are never deployed
-    assert plan.conflicting_mods() == {"hair", deploy.UNMANAGED}
+    assert plan.overwrites() == {"hair": (set(), {deploy.UNMANAGED})}
 
     text = report.format_conflicts(library, plan)
     assert "#1 hair  <  not managed by dao-modman   (1 file)" in text
     assert f"not managed by dao-modman   {OVERRIDE}/hand/" in text
-    assert report.select_conflicts(plan, []) == ([], [])  # cannot be accepted
 
 
 def mtimes(root: Path) -> dict[str, int]:

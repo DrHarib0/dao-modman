@@ -55,6 +55,15 @@ ModalScreen {
     width: 110;
 }
 
+.dialog .message {
+    height: auto;
+    max-height: 1fr;
+}
+
+.dialog .hint.keys {
+    dock: bottom;  /* below a long, scrolling message: always visible */
+}
+
 .dialog.tall {
     height: 90%;
 }

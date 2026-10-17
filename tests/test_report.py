@@ -93,122 +93,19 @@ def test_cli(
     assert capsys.readouterr().out == "no conflicts\n"
 
 
-def test_report_marks_and_orders_by_status(clashing: Library) -> None:
-    from dao_modman.core.models import Overwrite
-
-    gamma = clashing.mods["gamma"]
-    gamma.overwrites = [Overwrite("alpha", ["sword.uti"])]
-    text = report.format_conflicts(clashing, deploy.build_plan(clashing))
-    lines = text.splitlines()
-    # inside a group the accepted file comes after the open one
-    assert lines[:2] == ["#1 Alpha  <  #3 Gamma   (2 files)", "  Robe.DDS"]
-    assert "  sword.uti   \u2713 accepted" in lines
-
-    gamma.overwrites = [Overwrite("alpha")]
+def test_groups_follow_the_load_order(clashing: Library) -> None:
     lines = report.format_conflicts(clashing, deploy.build_plan(clashing)).splitlines()
-    # the fully accepted group moves below the one that still has an open conflict
-    assert lines[0] == "#1 Alpha  <  #2 Beta  <  #3 Gamma   (1 file)"
-    assert "#1 Alpha  <  #3 Gamma   (2 files, accepted)" in lines
+    groups = [line for line in lines if not line.startswith(" ") and line]
+    assert groups == [
+        "#1 Alpha  <  #3 Gamma   (2 files)",
+        "#1 Alpha  <  #2 Beta  <  #3 Gamma   (1 file)",
+    ]
 
     clashing.profile.move("gamma", -2)  # Gamma now loads first and loses
     lines = report.format_conflicts(clashing, deploy.build_plan(clashing)).splitlines()
-    assert lines[0].startswith("#1 Gamma  <")  # errors come first
-    # the file is named as the winner ships it, which is now Alpha's copy
-    assert (
-        "  robe.dds   \u2717 wrong order: #1 Gamma is set to overwrite #2 Alpha but loads before it"
-        in lines
-    )
-
-
-def test_cli_accept(
-    clashing: Library, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(cli, "load_config", lambda: Config(dirs=clashing.dirs))
-
-    def statuses() -> dict[str, str]:
-        library = Library(clashing.dirs)
-        return {c.name: c.status for c in deploy.build_plan(library).conflicts}
-
-    # an unknown name is an error and nothing is written
-    assert cli.main(["conflicts", "accept", "sword.uti", "nope.gda"]) == 1
-    assert "nope.gda" in capsys.readouterr().err
-    assert set(statuses().values()) == {"open"}
-
-    # by file name (case-insensitive, globs)
-    assert cli.main(["conflicts", "accept", "SWORD.uti"]) == 0
-    assert capsys.readouterr().out == "accepted sword.uti: gamma overwrites alpha\n"
-    assert statuses() == {"helm.mmh": "open", "Robe.DDS": "open", "sword.uti": "accepted"}
-    assert cli.main(["conflicts", "accept", "*.dds"]) == 0
-    assert statuses()["Robe.DDS"] == "accepted"
-
-    # by mod id: every open conflict the mod takes part in, winning or losing
-    assert cli.main(["conflicts", "accept", "beta"]) == 0
-    assert capsys.readouterr().out.endswith("accepted helm.mmh: gamma overwrites alpha, beta\n")
-    assert set(statuses().values()) == {"accepted"}
-    assert cli.main(["conflicts", "accept", "--all"]) == 0
-    assert capsys.readouterr().out == "no open conflicts\n"
-    assert cli.main(["conflicts"]) == 0
-
-    # entries are per file, so a new clash between the same mods is still reported
-    overwrites = Library(clashing.dirs).mods["gamma"].overwrites
-    assert sorted((o.mod, sorted(o.files)) for o in overwrites) == [
-        ("alpha", ["Robe.DDS", "helm.mmh", "sword.uti"]),
-        ("beta", ["helm.mmh"]),
+    groups = [line for line in lines if not line.startswith(" ") and line]
+    assert groups == [
+        "#1 Gamma  <  #2 Alpha   (2 files)",
+        "#1 Gamma  <  #2 Alpha  <  #3 Beta   (1 file)",
     ]
-
-    # a wrong load order makes the report fail and cannot be accepted
-    library = Library(clashing.dirs)
-    library.profile.move("gamma", -2)
-    library.save_profile()
-    assert cli.main(["conflicts"]) == 1
-    assert "wrong order" in capsys.readouterr().out
-    assert cli.main(["conflicts", "accept", "--all"]) == 0
-    out = capsys.readouterr().out
-    assert out.startswith("no open conflicts\nnot accepted: ") and "wrong order" in out
-
-
-def test_cli_accept_everything(
-    clashing: Library, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    monkeypatch.setattr(cli, "load_config", lambda: Config(dirs=clashing.dirs))
-    # accepting everything must be asked for explicitly
-    assert cli.main(["conflicts", "accept"]) == 2
-    try:
-        status = cli.main(["conflicts", "accept", "--all", "sword.uti"])
-    except SystemExit as exc:  # older argparse versions reject it themselves
-        status = exc.code
-    assert status == 2
-    assert "--all" in capsys.readouterr().err
-    assert {c.status for c in deploy.build_plan(Library(clashing.dirs)).conflicts} == {"open"}
-
-    assert cli.main(["conflicts", "accept", "--all"]) == 0
-    assert capsys.readouterr().out.count("accepted ") == 3
-    library = Library(clashing.dirs)
-    assert {c.status for c in deploy.build_plan(library).conflicts} == {"accepted"}
-
-
-def test_rules_about_a_removed_mod_are_reported_as_unused(
-    clashing: Library, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    from dao_modman.core.models import Overwrite
-
-    clashing.mods["gamma"].overwrites = [Overwrite("alpha", ["sword.uti", "Robe.DDS"])]
-    clashing.mods["delta"].overwrites = [Overwrite("alpha")]
-    clashing.profile.entry("beta").enabled = False  # disabled is not "gone"
-    clashing.mods["gamma"].overwrites.append(Overwrite("beta"))
-    assert report.unused_rules(clashing) == []
-
-    clashing.remove("alpha")
-    assert [(mod_id, rule.mod) for mod_id, rule in report.unused_rules(clashing)] == [
-        ("gamma", "alpha"),
-        ("delta", "alpha"),
-    ]
-    for mod in clashing.mods.values():
-        clashing.save_mod(mod)
-    monkeypatch.setattr(cli, "load_config", lambda: Config(dirs=clashing.dirs))
-    assert cli.main(["conflicts"]) == 0  # information, not an error
-    assert capsys.readouterr().out.splitlines() == [
-        "Unused overwrite rules (the other mod is not in the library):",
-        "  #2 Gamma may overwrite alpha: sword.uti, Robe.DDS",
-        "  #3 Delta may overwrite alpha: every file",
-    ]
+    assert "  robe.dds" in lines  # named as the winner ships it, now Alpha's copy

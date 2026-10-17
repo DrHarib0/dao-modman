@@ -46,9 +46,8 @@ def test_every_change_becomes_a_revision(tmp_path: Path, dirs: Dirs, user_dir: P
     library.profile.entry("one").enabled = False
     library.save_profile("disable one")
     one = library.mods["one"]
-    one.ops = [PathOp("remove", "packages/core/override/one/a.erf")]
+    one.ops = [PathOp("exclude", "packages/core/override/one/a.erf")]
     library.save_mod(one, "one: edit path operations (1)")
-    library.accept_overwrite("bodies", ["one"], "a.erf")
     deploy.apply(deploy.build_plan(library), user_dir, dirs.deployed_file)
     assert revisions.snapshot(dirs.data, "apply: 4 files")
     assert not revisions.snapshot(dirs.data, "nothing changed")  # no empty revisions
@@ -60,7 +59,6 @@ def test_every_change_becomes_a_revision(tmp_path: Path, dirs: Dirs, user_dir: P
         "bodies: set option Humans/Body = Big",
         "disable one",
         "one: edit path operations (1)",
-        "bodies: accept overwriting one (a.erf)",
         "apply: 4 files",
         "remove one",
     ]
@@ -71,7 +69,7 @@ def test_every_change_becomes_a_revision(tmp_path: Path, dirs: Dirs, user_dir: P
     assert git(dirs.data, "status", "--porcelain") == ""
     assert "dao-modman" in git(dirs.data, "log", "-1", "--format=%an")
     # the history shows what a change did
-    diff = git(dirs.data, "show", "--format=", "HEAD~5", "--", "mods/bodies/mod.toml")
+    diff = git(dirs.data, "show", "--format=", "HEAD~4", "--", "mods/bodies/mod.toml")
     assert '+"Humans/Body" = "Big"' in diff
 
 

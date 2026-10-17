@@ -376,13 +376,25 @@ class ModManApp(App[None]):
         changed = sum(not key.is_default(mod.options) for key in keys)
         return f"options ({changed} changed)" if changed else "options"
 
-    def _overwrites_note(self, mod: Mod) -> str:
-        """Names the mod this one is declared to overwrite, or counts them if several."""
-        targets = list(dict.fromkeys(overwrite.mod for overwrite in mod.overwrites))
-        if len(targets) != 1:
-            return f"overwrites {len(targets)} mods"
-        other = self.library.mods.get(targets[0])
-        return f"overwrites {other.name if other else targets[0] + ' (missing)'}"
+    def _overwrite_notes(self, beats: set[str], beaten_by: set[str]) -> list[str]:
+        """Which mods this one overwrites files of, and which overwrite its files.
+
+        A single mod is named, several are counted.
+        """
+
+        def mods(ids: set[str]) -> str:
+            if len(ids) == 1:
+                (mod_id,) = ids
+                return self.library.mods[mod_id].name
+            return f"{len(ids)} mods"
+
+        notes = [f"overwrites {mods(beats)}"] if beats else []
+        if deploy.UNMANAGED in beaten_by:
+            notes.append("overwritten by unmanaged files")
+            beaten_by = beaten_by - {deploy.UNMANAGED}
+        if beaten_by:
+            notes.append(f"overwritten by {mods(beaten_by)}")
+        return notes
 
     def refresh_table(
         self,
@@ -397,12 +409,12 @@ class ModManApp(App[None]):
         try:
             if plan is None:
                 plan = deploy.build_plan(self.library, self.foreign)
-            conflicting, misordered = plan.conflicting_mods(), plan.misordered_mods()
+            overwrites = plan.overwrites()
             if states is None:
                 record = self._record()  # while nothing is applied, the status line says so
                 states = deploy.compare(plan, record, self.foreign).mods if record else {}
         except (pathops.PathOpError, OSError) as exc:
-            conflicting, misordered, states = set(), set(), {}
+            overwrites, states = {}, {}
             self.notify(str(exc), severity="error", markup=False)
         self._pending = sum(state != deploy.APPLIED for state in states.values())
         ordered = self.library.ordered()
@@ -422,19 +434,11 @@ class ModManApp(App[None]):
             if not self._matches(mod.name, entry.group):
                 continue
             self._row_ids.append(mod.id)
-            options_note = self._options_note(mod)
-            notes = [
-                note
-                for note, active in (
-                    (states.get(mod.id, ""), states.get(mod.id, deploy.APPLIED) != deploy.APPLIED),
-                    ("wrong order", mod.id in misordered),
-                    ("conflict", entry.enabled and mod.id in conflicting),
-                    ("update", mod.id in self.updates),
-                    (self._overwrites_note(mod), bool(mod.overwrites)),
-                    (options_note, bool(options_note)),
-                )
-                if active
-            ]
+            state = states.get(mod.id, deploy.APPLIED)
+            notes = [state] if state != deploy.APPLIED else []
+            notes += self._overwrite_notes(*overwrites.get(mod.id, (set(), set())))
+            notes += ["update"] if mod.id in self.updates else []
+            notes += [note] if (note := self._options_note(mod)) else []
             cells = (
                 str(index),
                 mod.name,
@@ -445,10 +449,7 @@ class ModManApp(App[None]):
                 self._ignored_note(mod),
                 ", ".join(notes),
             )
-            row = self._cells(entry.enabled, cells)
-            if mod.id in misordered:
-                row[-1].stylize("bold red")
-            table.add_row(*row, key=mod.id)
+            table.add_row(*self._cells(entry.enabled, cells), key=mod.id)
         mod_rows = [row for row, mod_id in enumerate(self._row_ids) if mod_id is not None]
         if selected is not None and selected in self._row_ids:
             table.move_cursor(row=self._row_ids.index(selected))
@@ -847,21 +848,13 @@ class ModManApp(App[None]):
         ]
         lines += [f"\nwarning: {warning}" for warning in plan.warnings]
         lines += [
-            f"\n{target}\n  merged from: {', '.join(mods)}" for target, mods in plan.merged.items()
+            f"\n{target.rpartition('/')[2]} merged from {len(mods)} mods"
+            for target, mods in plan.merged.items()
         ]
         if plan.addins:
             lines.append(f"\nAddIns: {', '.join(addin.name for addin in plan.addins)}")
-        errors, open_ = plan.with_status(deploy.ERROR), plan.with_status(deploy.OPEN)
-        if errors:
-            lines.append(f"\n{len(errors)} overwrite(s) in the wrong load order:")
-            lines += [f"  {report.file_line(self.library, conflict)}" for conflict in errors[:8]]
-        if open_:
-            lines.append(f"\n{len(open_)} conflicting file(s), last mod wins:")
-            lines += [f"  {c.name}: {' < '.join(c.mod_ids)}" for c in open_[:8]]
-        if len(errors) > 8 or len(open_) > 8:
-            lines.append("  ... (v shows the full report)")
-        if accepted := len(plan.with_status(deploy.ACCEPTED)):
-            lines.append(f"\n{accepted} accepted overwrite(s)")
+        if conflicts := plan.conflicts:
+            lines.append(f"\n{len(conflicts)} file(s) overwritten by a later mod (v shows them)")
 
         def done(confirmed: bool | None) -> None:
             if confirmed:

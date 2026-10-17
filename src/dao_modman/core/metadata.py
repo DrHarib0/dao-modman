@@ -16,7 +16,6 @@ from .models import (
     ArchiveInfo,
     Mod,
     NexusInfo,
-    Overwrite,
     PathOp,
     Profile,
     ProfileEntry,
@@ -79,11 +78,6 @@ def mod_to_dict(mod: Mod) -> dict[str, Any]:
         data["addin"] = {"uids": mod.addin_uids}
     if mod.ops:
         data["ops"] = [op_to_dict(op) for op in mod.ops]
-    if mod.overwrites:
-        data["overwrites"] = [
-            {"mod": overwrite.mod, **({"files": overwrite.files} if overwrite.files else {})}
-            for overwrite in mod.overwrites
-        ]
     if mod.options:
         data["options"] = dict(mod.options)
     return data
@@ -114,10 +108,6 @@ def mod_from_dict(raw: dict[str, Any]) -> Mod:
                 uploaded=nexus.get("uploaded"),
             )
         mod.addin_uids = [str(uid) for uid in raw.get("addin", {}).get("uids", [])]
-        mod.overwrites = [
-            Overwrite(str(entry["mod"]), [str(name) for name in entry.get("files", [])])
-            for entry in raw.get("overwrites", [])
-        ]
         mod.options = {str(k): str(v) for k, v in raw.get("options", {}).items()}
     except (KeyError, ValueError, TypeError) as exc:
         raise MetadataError(f"invalid mod metadata: {exc}") from exc
