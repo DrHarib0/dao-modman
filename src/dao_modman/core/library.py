@@ -171,9 +171,17 @@ class Library:
                 problems += [f"{mod.id}: {warning}" for warning in warnings]
         return mapping
 
+    def selection(
+        self, mod: Mod, problems: list[str] | None = None
+    ) -> tuple[dict[str, str], dict[str, str]]:
+        """`(installed, left out)` target -> source mappings: the ignore patterns and the
+        mod's exclude/include operations applied."""
+        mapping = self.default_targets(mod, problems, ignored=True)
+        return pathops.select(mapping, self.ignore.matches, mod.ops)
+
     def targets(self, mod: Mod, problems: list[str] | None = None) -> dict[str, str]:
-        """Target path -> source file (relative to the mod's files dir), with ops applied."""
-        return pathops.apply_ops(self.default_targets(mod, problems), mod.ops)
+        """Target path -> source file (relative to the mod's files dir) of what is installed."""
+        return self.selection(mod, problems)[0]
 
     def set_option(self, mod: Mod, key: OptionKey, label: str) -> None:
         """Choose a value for an option; the package default is not stored."""

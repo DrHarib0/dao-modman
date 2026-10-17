@@ -113,12 +113,6 @@ ModalScreen {
     margin-top: 1;
 }
 
-#ops {
-    height: auto;
-    max-height: 8;
-    margin-top: 1;
-    color: $text-muted;
-}
 
 #splash-art {
     width: 100%;

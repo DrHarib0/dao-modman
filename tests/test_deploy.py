@@ -31,22 +31,21 @@ def addin_uids(user_dir: Path) -> list[str]:
 
 
 def test_plan_priority_and_conflicts(tmp_path: Path, library: Library) -> None:
-    low = library.import_archive(make_zip(tmp_path / "low.zip", {"x.erf": "low", "l.erf": "l"}))
-    high = library.import_archive(make_zip(tmp_path / "high.zip", {"X.ERF": "high"}))
-    for mod in (low, high):  # make both mods write to the same directory
-        mod.ops = [PathOp("rename", f"{OVERRIDE}/{mod.id}", f"{OVERRIDE}/shared")]
+    library.import_archive(make_zip(tmp_path / "low.zip", {"x.erf": "low", "l.erf": "l"}))
+    library.import_archive(make_zip(tmp_path / "high.zip", {"X.ERF": "high"}))
 
+    # the game finds override files by name: same name in other folders is a conflict
     plan = deploy.build_plan(library)
     assert {f.target: f.mod_id for f in plan.files} == {
-        f"{OVERRIDE}/shared/l.erf": "low",
-        f"{OVERRIDE}/shared/X.ERF": "high",
+        f"{OVERRIDE}/low/l.erf": "low",
+        f"{OVERRIDE}/high/X.ERF": "high",
     }
-    assert by_target(plan) == {f"{OVERRIDE}/shared/X.ERF": ["low", "high"]}
+    assert by_target(plan) == {f"{OVERRIDE}/high/X.ERF": ["low", "high"]}
     assert plan.conflicting_mods() == {"low", "high"}
 
     library.profile.move("high", -1)
     winner = {f.target.casefold(): f.mod_id for f in deploy.build_plan(library).files}
-    assert winner[f"{OVERRIDE}/shared/x.erf"] == "low"
+    assert winner[f"{OVERRIDE}/low/x.erf"] == "low"
 
     library.profile.entry("low").enabled = False
     plan = deploy.build_plan(library)
@@ -58,7 +57,7 @@ def test_apply_and_unapply(tmp_path: Path, library: Library, user_dir: Path) -> 
     (user_dir / "Packages/Core").mkdir(parents=True)  # existing casing must be reused
     (user_dir / "keep.txt").write_text("mine")
     mod = library.import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a", "docs/r.txt": "r"}))
-    mod.ops = [PathOp("remove", f"{OVERRIDE}/mod/docs")]
+    mod.ops = [PathOp("exclude", f"{OVERRIDE}/mod/docs")]
     deployed = library.dirs.deployed_file
 
     result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
@@ -181,8 +180,11 @@ def test_override_conflicts_are_by_file_name(
 
 def test_same_name_outside_override_is_not_a_conflict(tmp_path: Path, library: Library) -> None:
     for name in ("one", "two"):
-        mod = library.import_archive(make_zip(tmp_path / f"{name}.zip", {"data.erf": name}))
-        mod.ops = [PathOp("rename", f"{OVERRIDE}/{name}", f"other/{name}")]
+        files = {
+            "Manifest.xml": "<OverrideList/>",
+            f"BioWare/Dragon Age/other/{name}/data.erf": name,
+        }
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", files))
     plan = deploy.build_plan(library)
     assert [f.target for f in plan.files] == ["other/one/data.erf", "other/two/data.erf"]
     assert by_target(plan) == {}
@@ -446,8 +448,11 @@ def test_apply_cut_short_is_rolled_back_on_the_next_run(
 
 def test_progress_and_folder_casing(tmp_path: Path, library: Library, user_dir: Path) -> None:
     for name, folder in (("one", "Shared"), ("two", "shared")):
-        mod = library.import_archive(make_zip(tmp_path / f"{name}.zip", {f"{name}.erf": name}))
-        mod.ops = [PathOp("rename", f"{OVERRIDE}/{name}", f"extra/{folder}")]
+        files = {
+            "Manifest.xml": "<OverrideList/>",
+            f"BioWare/Dragon Age/extra/{folder}/{name}.erf": name,
+        }
+        library.import_archive(make_zip(tmp_path / f"{name}.zip", files))
     seen: list[tuple[str, int, int]] = []
     deployed = library.dirs.deployed_file
     deploy.apply(deploy.build_plan(library), user_dir, deployed, lambda *step: seen.append(step))
@@ -593,14 +598,13 @@ def test_apply_only_touches_what_changed(tmp_path: Path, library: Library, user_
     assert (result.written, result.removed, result.unchanged) == (1, 0, 2)
     assert {k: v for k, v in mtimes(user_dir).items() if k in before} == before
 
-    # a path operation moves a file: the old copy goes, the new one is written
-    one.ops = [PathOp("rename", f"{OVERRIDE}/one/sub", f"{OVERRIDE}/one/moved")]
+    # excluding a folder removes its files, and the emptied folder
+    one.ops = [PathOp("exclude", f"{OVERRIDE}/one/sub")]
     plan = deploy.build_plan(library)
     assert deploy.compare(plan, deploy.load_record(deployed)).mods["one"] == deploy.CHANGED
     result = deploy.apply(plan, user_dir, deployed)
-    assert (result.written, result.removed, result.unchanged) == (1, 1, 2)
-    assert not (user_dir / OVERRIDE / "one/sub").exists()  # the emptied folder went too
-    assert (user_dir / OVERRIDE / "one/moved/b.erf").read_text() == "b"
+    assert (result.written, result.removed, result.unchanged) == (0, 1, 2)
+    assert not (user_dir / OVERRIDE / "one/sub").exists()
 
     # a library file with new content (an update) is written again
     source = library.files_dir(two.id) / "c.erf"
@@ -618,7 +622,7 @@ def test_apply_only_touches_what_changed(tmp_path: Path, library: Library, user_
         "two": deploy.APPLIED,
     }
     result = deploy.apply(plan, user_dir, deployed)
-    assert (result.written, result.removed, result.unchanged) == (0, 2, 1)
+    assert (result.written, result.removed, result.unchanged) == (0, 1, 1)
     assert tree(user_dir) == [f"{OVERRIDE}/two/c.erf"]
     assert not (user_dir / OVERRIDE / "one").exists()
 

@@ -23,7 +23,7 @@ have moved on from Windows to Linux since then like the author did, the goal of 
 - Conflict Detection and Resolving
 - Adopt: take over a game that was modded by hand or with another tool
 - Mod Ordering: no more prefixes for mod directories - load order is defined in the manager
-- Mix and Match: pick which parts of a mod you want, in the UI. This selection persists if you disable a mod and reenable it later
+- Mix and Match: pick which files of a mod you want, in the UI; the directory structure is taken care of. This selection persists if you disable a mod and reenable it later
 - Setup: to get the game running smoothly, `dao-modman` handles the technical stuff:
   - LAA Patch so the game can use 4GB of RAM instead of its intended 2GB
   - enabling the developer console
@@ -91,7 +91,7 @@ The bar at the bottom shows the everyday keys; `?` lists all of them.
 | `p`              | options of an override package           |
 | `n`              | add mod from Nexus (URL, id or `nxm://`) |
 | `i`              | import a local archive                   |
-| `e`              | edit path operations                     |
+| `e`              | choose which files of a mod are installed |
 | `o`              | open the mod's Nexus page in the browser |
 | `c`              | check Nexus for updates                  |
 | `u`              | update the selected mod in place         |

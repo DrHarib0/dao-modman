@@ -107,7 +107,8 @@ async def test_toggle_move_and_group(tmp_path: Path, dirs: Dirs, user_dir: Path)
 
 
 async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
-    archive = make_zip(tmp_path / "mod.zip", {"a.erf": "a", "docs/extra.erf": "r"})
+    files = {"a.erf": "a", "docs/extra.erf": "r", "readme.txt": "read me"}
+    archive = make_zip(tmp_path / "mod.zip", files)
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("i")
@@ -116,8 +117,9 @@ async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert [row[2] for row in rows(app)] == ["mod"]
+        assert rows(app)[0][7] == "1"  # the readme, by the ignore patterns
 
-        # remove the docs folder, rename the erf
+        # exclude the docs folder, include the readme
         await pilot.press("e")
         screen = app.screen
         assert isinstance(screen, PathOpsScreen)
@@ -132,23 +134,22 @@ async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_
             tree.move_cursor(find(tree.root))
 
         select(f"{OVERRIDE}/mod/docs")
-        await pilot.press("r")
-        select(f"{OVERRIDE}/mod/a.erf")
-        await pilot.press("m")
-        app.screen.query_one(Input).value = f"{OVERRIDE}/renamed/b.erf"
-        await pilot.press("enter")
+        await pilot.press("space")
+        select(f"{OVERRIDE}/mod/readme.txt")
+        await pilot.press("space")
         await pilot.pause()
-        assert len(screen.ops) == 2
+        assert tree.ignored == {f"{OVERRIDE}/mod/docs", f"{OVERRIDE}/mod/docs/extra.erf"}
         await pilot.press("s")
         await pilot.pause()
-        assert rows(app)[0][7] == "2"
+        assert rows(app)[0][7] == "1"  # now docs/extra.erf
 
         await pilot.press("a")
         assert isinstance(app.screen, ConfirmScreen)
         await pilot.press("y")
         await app.workers.wait_for_complete()
-        assert (user_dir / OVERRIDE / "renamed/b.erf").read_text() == "a"
-        assert not (user_dir / OVERRIDE / "mod").exists()
+        assert (user_dir / OVERRIDE / "mod/readme.txt").read_text() == "read me"
+        assert (user_dir / OVERRIDE / "mod/a.erf").is_file()
+        assert not (user_dir / OVERRIDE / "mod/docs").exists()
 
         await pilot.press("x")
         await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
@@ -157,8 +158,8 @@ async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_
         assert not (user_dir / "packages").exists()
 
     assert Library(dirs).mods["mod"].ops == [
-        PathOp("remove", f"{OVERRIDE}/mod/docs"),
-        PathOp("rename", f"{OVERRIDE}/mod/a.erf", f"{OVERRIDE}/renamed/b.erf"),
+        PathOp("exclude", f"{OVERRIDE}/mod/docs"),
+        PathOp("include", f"{OVERRIDE}/mod/readme.txt"),
     ]
 
 
@@ -166,11 +167,15 @@ async def test_path_ops_cancel_and_undo(tmp_path: Path, dirs: Dirs, user_dir: Pa
     Library(dirs).import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a"}))
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
-        await pilot.press("e", "down", "r")
-        assert len(app.screen.ops) == 1
-        await pilot.press("u")
+        await pilot.press("e", "down", "space")
+        assert app.screen.ops == [PathOp("exclude", "packages")]
+        await pilot.press("space")  # again: the operation goes, nothing is added
         assert app.screen.ops == []
-        await pilot.press("down", "r", "escape")
+        await pilot.press("space", "u")
+        assert app.screen.ops == []
+        await pilot.press("u")  # undo the toggle before that
+        assert app.screen.ops == [PathOp("exclude", "packages")]
+        await pilot.press("down", "space", "escape")
         await pilot.pause()
     assert Library(dirs).mods["mod"].ops == []
 
@@ -518,13 +523,14 @@ async def test_path_tree_folding_and_filter(tmp_path: Path, dirs: Dirs, user_dir
         await pilot.press("left")
         assert folded() == {"docs/img"}
 
-        # folds and the cursor position survive an operation
+        # folds and the cursor position survive a change
         await go("textures/big.dds")
-        await pilot.press("r")
+        await pilot.press("space")
         assert folded() == {"docs/img"}
-        assert tree.cursor_node.data == base  # "textures" is gone, so its parent
+        assert tree.cursor_node.data == f"{base}/textures/big.dds"  # still shown, marked
+        assert f"{base}/textures/big.dds" in tree.ignored
         await pilot.press("u")
-        assert folded() == {"docs/img"}
+        assert folded() == {"docs/img"} and not tree.ignored
 
         # fold all / unfold all
         await pilot.press("c")
@@ -542,20 +548,20 @@ async def test_path_tree_folding_and_filter(tmp_path: Path, dirs: Dirs, user_dir
         await pilot.press("enter")
         assert tree.has_focus
 
-        # operations work on the filtered tree
+        # excluding works on the filtered tree
         await go("docs/img/Pic.dds")
-        await pilot.press("r")
-        assert files() == []
+        await pilot.press("space")
+        assert files() == ["docs/img/Pic.dds"] and f"{base}/docs/img/Pic.dds" in tree.ignored
 
         # escape leaves the filter first, then the dialog
         await pilot.press("escape")
         await pilot.pause()
         assert app.screen is screen and not box.display
-        assert files() == ["a.erf", "docs/notes.gda", "textures/big.dds"]
+        assert files() == ["a.erf", "docs/img/Pic.dds", "docs/notes.gda", "textures/big.dds"]
         await pilot.press("s")
         await pilot.pause()
 
-    assert Library(dirs).mods["mod"].ops == [PathOp("remove", f"{base}/docs/img/Pic.dds")]
+    assert Library(dirs).mods["mod"].ops == [PathOp("exclude", f"{base}/docs/img/Pic.dds")]
 
 
 async def test_rename_mod(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
@@ -1353,7 +1359,8 @@ async def test_adopt_files_installed_by_hand(tmp_path: Path, dirs: Dirs, user_di
         )
         await pilot.press("y")
         await app.workers.wait_for_complete()
-        assert hand.read_text() == "by hand"
+        # installed again from the library, in the mod's own folder
+        assert (user_dir / OVERRIDE / "hand-mod/hand.erf").read_text() == "by hand"
 
 
 async def test_apply_names_the_files_it_left_alone(
@@ -1591,8 +1598,8 @@ async def test_path_editor_shows_ignored_files_and_opens_files(
         await pilot.pause()
         assert opened[-1] == files / "setup.exe"
 
-        # ignored files move along with their folder
-        screen.ops = [PathOp("rename", f"{OVERRIDE}/mod/data", f"{OVERRIDE}/docs")]
+        # an excluded folder is marked like the files in it
+        screen.ops = [PathOp("exclude", f"{OVERRIDE}/mod/data")]
         screen.rebuild()
-        assert tree.ignored == {f"{OVERRIDE}/docs/readme.txt"}
+        assert tree.ignored == {f"{OVERRIDE}/mod/data", erf, readme}
         await pilot.press("escape")

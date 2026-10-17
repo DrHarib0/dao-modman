@@ -68,7 +68,7 @@ from .screens import (
 ENABLED = "✓"
 T = TypeVar("T")
 
-COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", "Ops", "Notes")
+COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", "Ignored", "Notes")
 
 
 @dataclass
@@ -142,7 +142,7 @@ KEYS = [
     Key("h", "toggle_official", "DLC", "Hide or show the game's official DLC", "Mod list"),
     Key("slash", "filter", "Filter", "Filter the list by name or group", "Mod list", display="/"),
     Key("escape", "clear_filter", "Unfilter", "Clear the filter", "Mod list", display="esc"),
-    Key("e", "edit_paths", "Paths", "Remove or rename the files a mod installs", "Mod contents"),
+    Key("e", "edit_paths", "Files", "Choose which of a mod's files are installed", "Mod contents"),
     Key("p", "options", "Options", "Choose the variants of an override package", "Mod contents"),
     Key("v", "conflicts", "Conflicts", "Show the files the mod shares with others", "Mod contents"),
     Key("L", "items", "Items", "List the items a mod adds, by their in-game names", "Mod contents"),
@@ -360,6 +360,14 @@ class ModManApp(App[None]):
         style = "" if enabled else "dim"
         return [Text(cell, style=style) for cell in (number, ENABLED if enabled else "", *rest)]
 
+    def _ignored_note(self, mod: Mod) -> str:
+        """How many of the mod's files are not installed (ignore patterns and excludes)."""
+        try:
+            left_out = len(self.library.selection(mod)[1])
+        except pathops.PathOpError:
+            return "?"
+        return str(left_out) if left_out else ""
+
     def _options_note(self, mod: Mod) -> str:
         """Says that a mod has package options, and how many differ from the defaults."""
         keys = [key for package in self.library.options(mod) for key in package.keys]
@@ -434,7 +442,7 @@ class ModManApp(App[None]):
                 entry.group,
                 mod.kind,
                 f"nexus:{mod.nexus.mod_id}" if mod.nexus else "local",
-                str(len(mod.ops)) if mod.ops else "",
+                self._ignored_note(mod),
                 ", ".join(notes),
             )
             row = self._cells(entry.enabled, cells)
@@ -629,7 +637,7 @@ class ModManApp(App[None]):
         def done(ops: list[PathOp] | None) -> None:
             if ops is not None:
                 mod.ops = ops
-                self.library.save_mod(mod, f"{mod.id}: edit path operations ({len(ops)})")
+                self.library.save_mod(mod, f"{mod.id}: choose files ({len(ops)} operations)")
                 self.refresh_table()
 
         base = self.library.default_targets(mod, ignored=True)

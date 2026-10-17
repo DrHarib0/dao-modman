@@ -158,6 +158,7 @@ async def test_install_from_nexus_and_update_in_place(tmp_path: Path) -> None:
         path = tmp_path / "tmp.zip"
         with zipfile.ZipFile(path, "w") as zf:
             zf.writestr("a.erf", content)
+            zf.writestr("b.erf", "extra")  # excluded by the user, before and after the update
         return path.read_bytes()
 
     payloads = {"/v1.zip": archive("one"), "/v2.zip": archive("two")}
@@ -187,14 +188,14 @@ async def test_install_from_nexus_and_update_in_place(tmp_path: Path) -> None:
     assert (mod.id, mod.name, mod.version, updated) == ("my-mod", "My Mod", "9", False)
     assert (mod.nexus.mod_id, mod.nexus.file_id) == (7, 1)
     assert (library.dirs.downloads / "v1.zip").is_file()
-    mod.ops = [PathOp("rename", "packages/core/override/my-mod/a.erf", "x/a.erf")]
+    mod.ops = [PathOp("exclude", "packages/core/override/my-mod/b.erf")]
     library.save_mod(mod)
 
     mod, updated = await install_from_nexus(client, library, 7, 2)
     assert updated
     assert list(library.mods) == ["my-mod"]
     assert mod.nexus.file_id == 2
-    assert library.targets(mod) == {"x/a.erf": "a.erf"}
+    assert library.targets(mod) == {"packages/core/override/my-mod/a.erf": "a.erf"}
     assert (library.files_dir("my-mod") / "a.erf").read_text() == "two"
     assert sorted(p.name for p in library.dirs.downloads.iterdir()) == ["v1.zip", "v2.zip"]
 

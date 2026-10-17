@@ -1,4 +1,8 @@
-"""Resolve a mod's target paths: default mapping plus the user's remove/rename operations."""
+"""Resolve a mod's target paths: the default mapping, then which files are installed.
+
+The ignore patterns leave some files out; the user's exclude and include operations decide
+about the rest. Where files go is fixed: the game finds override files by name.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +15,8 @@ from .models import (
     KIND_MIXED,
     KIND_OVERRIDE,
     KIND_PACKAGE,
-    OP_REMOVE,
-    OP_RENAME,
+    OP_EXCLUDE,
+    OP_INCLUDE,
     Mod,
     PathOp,
 )
@@ -108,44 +112,34 @@ def matches(pattern: str, path: str, *, glob: bool = True) -> bool:
 
 def validate(op: PathOp) -> PathOp:
     """Return a normalized copy of `op`, raising PathOpError if it is unusable."""
+    if op.op not in (OP_EXCLUDE, OP_INCLUDE):
+        raise PathOpError(f"unknown operation {op.op!r}")
     try:
-        if op.op == OP_REMOVE:
-            return PathOp(OP_REMOVE, normalize_rel(op.path))
-        if op.op == OP_RENAME:
-            if op.to is None:
-                raise ValueError("rename needs a destination")
-            return PathOp(OP_RENAME, normalize_rel(op.path), normalize_rel(op.to))
+        return PathOp(op.op, normalize_rel(op.path))
     except ValueError as exc:
         raise PathOpError(f"{op.describe()}: {exc}") from exc
-    raise PathOpError(f"unknown operation {op.op!r}")
 
 
-def apply_op[T](mapping: dict[str, T], op: PathOp) -> dict[str, T]:
-    op = validate(op)
-    result: dict[str, T] = {}
-    moved: dict[str, T] = {}
-    # Globs only apply to removes, and only when the pattern is not an existing literal path.
-    glob = op.op == OP_REMOVE and not any(matches(op.path, t, glob=False) for t in mapping)
-    for target, source in mapping.items():
-        if not matches(op.path, target, glob=glob):
-            result[target] = source
-        elif op.op == OP_RENAME:
-            rest = target.split("/")[op.path.count("/") + 1 :]
-            moved["/".join([op.to, *rest])] = source
-    # Like `mv`: a renamed file replaces whatever was at the destination.
-    folded = {target.casefold() for target in moved}
-    result = {target: src for target, src in result.items() if target.casefold() not in folded}
-    result.update(moved)
-    return result
+def select[T](
+    mapping: dict[str, T], ignored: Callable[[T], bool] | None, ops: list[PathOp]
+) -> tuple[dict[str, T], dict[str, T]]:
+    """Split a target -> source mapping into `(installed, left out)`.
 
-
-def apply_ops[T](mapping: dict[str, T], ops: list[PathOp]) -> dict[str, T]:
-    """Run `ops` in order over a target -> source mapping."""
-    for op in ops:
-        mapping = apply_op(mapping, op)
-    return dict(sorted(mapping.items()))
+    A file starts out installed unless `ignored` (the ignore patterns) says otherwise; then
+    each operation, in order, excludes or includes the files it names. A glob only counts as
+    one when it is not also the literal path of a file or folder.
+    """
+    installed = {t: not (ignored and ignored(source)) for t, source in mapping.items()}
+    for op in map(validate, ops):
+        glob = not any(matches(op.path, target, glob=False) for target in mapping)
+        for target in mapping:
+            if matches(op.path, target, glob=glob):
+                installed[target] = op.op == OP_INCLUDE
+    chosen = {t: source for t, source in sorted(mapping.items()) if installed[t]}
+    left_out = {t: source for t, source in sorted(mapping.items()) if not installed[t]}
+    return chosen, left_out
 
 
 def resolve(mod: Mod, files: list[str], ignored: Ignored | None = None) -> dict[str, str]:
-    """Final target -> source mapping for a mod."""
-    return apply_ops(default_mapping(mod, files, ignored), mod.ops)
+    """Final target -> source mapping for a mod: what gets installed."""
+    return select(default_mapping(mod, files), ignored, mod.ops)[0]

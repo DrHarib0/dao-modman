@@ -6,8 +6,8 @@ of files (an override folder, an AddIn) is packed into an archive in `downloads/
 layout the library already understands, and imported like any other archive. Every file
 then deploys to exactly where it was:
 
-- override files become an ordinary mod of loose files; a rename path operation puts them
-  back into their folder if it is not named like the mod;
+- override files become an ordinary mod of loose files, installed to the mod's own folder
+  like any mod (the game finds them by name);
 - an AddIn registered in `Settings/AddIns.xml` becomes a dazip, with its registration as the
   manifest, so apply registers it again;
 - everything else becomes an override package (`BioWare/Dragon Age/<path>`), the only layout
@@ -32,7 +32,7 @@ from . import addins, deploy, pathops
 from .archive import sha256_file
 from .dazip import AddIn
 from .library import Library, LibraryError, slugify
-from .models import OP_RENAME, Mod, PathOp
+from .models import Mod
 from .paths import resolve_case
 
 OVERRIDE = ("packages", "core", "override")
@@ -166,12 +166,15 @@ def pack(group: Group, archive: Path) -> None:
             zf.write(path, f"{prefix}/{rel}")
 
 
-def _place(library: Library, mod: Mod, group: Group) -> None:
-    """Send loose override files back to their folder if it is not the mod's own."""
-    own = f"{pathops.OVERRIDE_DIR}/{mod.id}"
-    if group.folder is not None and group.folder.casefold() != own.casefold():
-        mod.ops = [PathOp(OP_RENAME, own, group.folder)]
-        library.save_mod(mod, f"{mod.id}: keep the files in {group.folder}")
+def _target(mod: Mod, group: Group, rel: str) -> str:
+    """Where an original of the group is installed from the library.
+
+    Override files go to the mod's own folder (the game finds them by name, wherever they
+    are); AddIns and other packages to exactly where they were.
+    """
+    if group.folder is None:
+        return rel
+    return f"{pathops.OVERRIDE_DIR}/{mod.id}/{rel[len(group.folder) + 1 :]}"
 
 
 def _verify(library: Library, mod: Mod, group: Group) -> None:
@@ -179,7 +182,7 @@ def _verify(library: Library, mod: Mod, group: Group) -> None:
     targets = {target.casefold(): source for target, source in library.targets(mod).items()}
     files_dir = library.files_dir(mod.id)
     for rel, path in group.files:
-        source = targets.get(rel.casefold())
+        source = targets.get(_target(mod, group, rel).casefold())
         if source is None:
             raise AdoptError(f"{mod.name}: {rel} would not be installed again")
         if sha256_file(files_dir / source) != sha256_file(path):
@@ -230,7 +233,6 @@ def adopt(
             name = None if group.addin is not None else group.name  # dazips: the AddIn's title
             mod = library.import_archive(archive, name=name)
             result.mods.append(mod)
-            _place(library, mod, group)
             _verify(library, mod, group)
     except (AdoptError, LibraryError, OSError, zipfile.BadZipFile) as exc:
         for mod in result.mods:

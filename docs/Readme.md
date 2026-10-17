@@ -13,7 +13,7 @@ which on Steam/Proton is
     ~/.local/share/dao-modman/
       downloads/            # original archives, never modified
       mods/<id>/
-        mod.toml            # metadata: source, version, archive hash, path operations, options
+        mod.toml            # metadata: source, version, archive hash, file choices, options
         files/              # archive extracted as-is
       profile.toml          # load order, enabled flags, groups
       deployed.json         # what was written to the game dir (path + SHA-256)
@@ -51,33 +51,38 @@ or `"kitty --class dao-modman"`), else `$TERMINAL`, else `xdg-terminal-exec`, el
 configured terminal, else the first one found of konsole, gnome-terminal, kitty, alacritty,
 foot, wezterm, xterm.
 
-## Path operations
+## Choosing a mod's files
 
-Archives often contain readmes, screenshots or several variants. Before applying, each mod's
-file tree can be edited: **remove** a file/folder or **rename/move** it. The operations are
-stored in order in `mod.toml` and replayed when deploying; the extracted files and the archive
-are never changed, so operations can be undone at any time.
+Archives often contain readmes, screenshots, optional parts or several variants. Where a
+mod's files end up does not matter: below `override/` the game finds files by name, in any
+folder. What matters is *which* files are installed, and that is what the file editor (`e`)
+is for. It shows every file of the mod where it would go; files that are not installed are
+dimmed and marked "ignored":
+
+- files the [ignore patterns](#ignored-files) leave out (readmes, pictures, links ...),
+- files and folders you exclude.
+
+`space` excludes the selected file or folder, or includes it again; that also works for a
+file an ignore pattern leaves out, e.g. a readme a mod really needs. `u` undoes the last
+change, `o` opens the selected file's copy in the library with the program the desktop uses
+for it (for programs and scripts, `.exe`, `.bat`, `.sh` ..., it asks first, as opening them
+may run them). `←`/`→` fold and unfold a folder, `c` folds or unfolds everything, and `/`
+filters the tree to entries whose file or folder name contains the typed text (`esc` clears
+it). `s` saves, `esc` cancels.
+
+The choices are stored as operations in `mod.toml`, applied in order when deploying; the
+extracted files and the archive are never changed, so they can be undone at any time:
 
     [[ops]]
-    op = "remove"
+    op = "exclude"
     path = "packages/core/override/my-mod/optional"     # file, folder or glob
 
     [[ops]]
-    op = "rename"
-    from = "packages/core/override/my-mod/variant-b"
-    to = "packages/core/override/my-mod/textures"
+    op = "include"
+    path = "packages/core/override/my-mod/optional/readme.txt"
 
-Paths are relative to the game user dir and matched case-insensitively.
-
-In the editor (`e`): `r` removes and `m` renames/moves the selected entry, `u` undoes the last
-operation. `←`/`→` fold and unfold a folder, `c` folds or unfolds everything, and `/` filters
-the tree to entries whose file or folder name contains the typed text (`esc` clears it).
-
-Ignored files (readmes, screenshots, see [Ignored files](#ignored-files)) are shown too,
-dimmed and marked "ignored", where they would go: they move along with path operations but
-are never installed. `o` opens the selected file's copy in the library with the program the
-desktop uses for it; for programs and scripts (`.exe`, `.bat`, `.sh` ...) it asks first, as
-opening them may run them.
+Paths are relative to the game user dir and matched case-insensitively. The `Ignored` column
+of the mod list counts the files of a mod that are not installed.
 
 ## Items
 
@@ -127,7 +132,8 @@ are not on it.
 ## How deployment works
 
 - Target paths are relative to the game user dir: dazip `Contents/` maps 1:1; loose files go
-  to `packages/core/override/<mod-id>/`. Path operations are then applied on top.
+  to `packages/core/override/<mod-id>/`. The ignore patterns and the mod's exclude and
+  include operations then decide which of them are installed.
 - An archive may contain any number of `.dazip` files next to loose files. Each dazip is
   unpacked on import and installed as described by its `Contents/` folder; the rest is treated
   as loose override files. An AddIn is registered as long as at least one file of its dazip is
@@ -270,8 +276,8 @@ them (apply names the files it left alone), and lists them in the conflict repor
 "Adopt files not managed by dao-modman" in the Tools menu (`t`) takes them into the library:
 
 - each folder in `packages/core/override/` becomes one mod of loose override files, named
-  after the folder; the files directly in `override/` one more. If the folder is not named
-  like the mod's id, a rename path operation (`e`) keeps the files in their folder;
+  after the folder; the files directly in `override/` one more. Like any mod, they are
+  installed to the mod's own folder in `override/`, which the game does not mind;
 - each `AddIns/<uid>/` folder becomes one mod. If the AddIn is registered in
   `Settings/AddIns.xml`, it becomes a dazip, named after the AddIn's title, and apply
   registers it again;

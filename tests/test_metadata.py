@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
+import tomli_w
 
 from dao_modman.core import metadata
 from dao_modman.core.models import (
@@ -27,7 +28,7 @@ def test_mod_round_trip(tmp_path: Path) -> None:
         archive=ArchiveInfo("My Mod-1-1-0.zip", "aa", "bb"),
         nexus=NexusInfo("dragonage", 1, 22, "My Mod-1-1-0.zip", datetime(2020, 1, 2, tzinfo=UTC)),
         addin_uids=["uid1"],
-        ops=[PathOp("remove", "docs"), PathOp("rename", "a/b", "c/d")],
+        ops=[PathOp("exclude", "docs"), PathOp("include", "docs/keep.txt")],
         overwrites=[Overwrite("other-mod", ["a.gda", "abi_*.gda"]), Overwrite("whole-mod")],
         options={"Human Females/Hand Size": "NB big"},
     )
@@ -40,10 +41,20 @@ def test_mod_round_trip(tmp_path: Path) -> None:
 
     raw = tomllib.loads((tmp_path / "mod.toml").read_text())
     assert raw["ops"] == [
-        {"op": "remove", "path": "docs"},
-        {"op": "rename", "from": "a/b", "to": "c/d"},
+        {"op": "exclude", "path": "docs"},
+        {"op": "include", "path": "docs/keep.txt"},
     ]
     assert raw["nexus"]["mod_id"] == 1
+
+
+@pytest.mark.parametrize(
+    "op", [{"op": "remove", "path": "a"}, {"op": "rename", "from": "a", "to": "b"}]
+)
+def test_operations_of_earlier_versions_are_rejected(tmp_path: Path, op: dict) -> None:
+    data = {"id": "m", "name": "M", "ops": [op]}
+    (tmp_path / "mod.toml").write_text(tomli_w.dumps(data))
+    with pytest.raises(metadata.MetadataError, match="unknown operation"):
+        metadata.load_mod(tmp_path)
 
 
 def test_minimal_mod_has_no_optional_tables(tmp_path: Path) -> None:

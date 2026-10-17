@@ -192,7 +192,7 @@ def test_replace_archive_keeps_id_order_and_ops(tmp_path: Path, library: Library
 
     mod = library.import_archive(make_zip(tmp_path / "v1.zip", {"a.erf": "1", "docs/r.txt": "r"}))
     library.import_archive(make_zip(tmp_path / "other.zip", {"o": "o"}))
-    mod.ops = [PathOp("remove", "packages/core/override/v1/docs")]
+    mod.ops = [PathOp("exclude", "packages/core/override/v1/docs")]
     library.save_mod(mod)
 
     new = make_zip(tmp_path / "v2.zip", {"a.erf": "2", "new.erf": "n", "docs/r.txt": "r"})

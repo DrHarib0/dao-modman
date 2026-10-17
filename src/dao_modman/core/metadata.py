@@ -11,8 +11,8 @@ import tomli_w
 
 from . import pathops
 from .models import (
-    OP_REMOVE,
-    OP_RENAME,
+    OP_EXCLUDE,
+    OP_INCLUDE,
     ArchiveInfo,
     Mod,
     NexusInfo,
@@ -37,17 +37,15 @@ def write_atomic(path: Path, data: bytes) -> None:
 
 
 def op_to_dict(op: PathOp) -> dict[str, str]:
-    if op.op == OP_RENAME:
-        return {"op": OP_RENAME, "from": op.path, "to": op.to or ""}
-    return {"op": OP_REMOVE, "path": op.path}
+    return {"op": op.op, "path": op.path}
 
 
 def op_from_dict(raw: dict[str, Any]) -> PathOp:
     """Parse and validate an op; mod.toml may have been edited by hand."""
     try:
         kind = raw["op"]
-        if kind == OP_RENAME:
-            return pathops.validate(PathOp(OP_RENAME, str(raw["from"]), str(raw["to"])))
+        if kind not in (OP_EXCLUDE, OP_INCLUDE):
+            raise pathops.PathOpError(f"unknown operation {kind!r}")
         return pathops.validate(PathOp(str(kind), str(raw["path"])))
     except (KeyError, pathops.PathOpError) as exc:
         raise MetadataError(f"invalid path operation {raw!r}: {exc}") from exc

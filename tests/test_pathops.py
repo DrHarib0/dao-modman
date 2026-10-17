@@ -6,11 +6,11 @@ from dao_modman.core.ignore import IgnoreRules
 from dao_modman.core.models import Mod, PathOp
 from dao_modman.core.pathops import (
     PathOpError,
-    apply_ops,
     default_mapping,
     kind,
     matches,
     resolve,
+    select,
 )
 
 MAPPING = {
@@ -91,85 +91,70 @@ def test_matches() -> None:
     assert not matches("*.txt", "a/b.erf")
 
 
-def test_remove_file_and_directory_case_insensitive() -> None:
-    result = apply_ops(
-        MAPPING, [PathOp("remove", "override/mod/optional"), PathOp("remove", "override/mod/a.erf")]
+def installed(ops: list[PathOp], ignored=None) -> list[str]:
+    return list(select(MAPPING, ignored, ops)[0])
+
+
+def test_exclude_file_and_directory_case_insensitive() -> None:
+    ops = [PathOp("exclude", "override/mod/optional"), PathOp("exclude", "override/mod/a.erf")]
+    chosen, left_out = select(MAPPING, None, ops)
+    assert list(chosen) == ["override/mod/docs/readme.txt"]
+    assert list(left_out) == [
+        "override/mod/Optional/b.erf",
+        "override/mod/Optional/sub/c.erf",
+        "override/mod/a.erf",
+    ]
+
+
+def test_exclude_glob() -> None:
+    assert installed([PathOp("exclude", "*/readme.txt"), PathOp("exclude", "*.erf")]) == []
+
+
+def test_include_what_an_ignore_pattern_leaves_out() -> None:
+    ignored = IgnoreRules().matches  # readme.txt is ignored by default
+    assert "override/mod/docs/readme.txt" not in installed([], ignored)
+    assert "override/mod/docs/readme.txt" in installed(
+        [PathOp("include", "override/mod/docs/readme.txt")], ignored
     )
-    assert list(result) == ["override/mod/docs/readme.txt"]
-
-
-def test_remove_glob() -> None:
-    result = apply_ops(MAPPING, [PathOp("remove", "*/readme.txt"), PathOp("remove", "*.erf")])
-    assert result == {}
-
-
-def test_rename_directory_and_file() -> None:
-    result = apply_ops(
-        MAPPING,
-        [
-            PathOp("rename", "override/mod/Optional", "override/mod/main"),
-            PathOp("rename", "override/mod/a.erf", "elsewhere/z.erf"),
-        ],
-    )
-    assert result == {
-        "elsewhere/z.erf": "a.erf",
-        "override/mod/docs/readme.txt": "docs/readme.txt",
-        "override/mod/main/b.erf": "Optional/b.erf",
-        "override/mod/main/sub/c.erf": "Optional/sub/c.erf",
-    }
 
 
 def test_ops_run_in_order() -> None:
-    ops = [
-        PathOp("rename", "override/mod/Optional", "override/mod/x"),
-        PathOp("remove", "override/mod/x/sub"),
-    ]
-    assert "override/mod/x/b.erf" in apply_ops(MAPPING, ops)
-    assert "override/mod/x/sub/c.erf" not in apply_ops(MAPPING, ops)
-    # reversed, the remove no longer matches anything
-    assert "override/mod/x/sub/c.erf" in apply_ops(MAPPING, ops[::-1])
-
-
-def test_rename_replaces_existing_destination() -> None:
-    result = apply_ops(
-        MAPPING, [PathOp("rename", "override/mod/Optional/b.erf", "override/mod/A.erf")]
-    )
-    assert result["override/mod/A.erf"] == "Optional/b.erf"
-    assert "override/mod/a.erf" not in result
+    folder, file = "override/mod/Optional", "override/mod/Optional/sub/c.erf"
+    # exclude a folder, include one file back
+    ops = [PathOp("exclude", folder), PathOp("include", file)]
+    assert installed(ops) == [file, "override/mod/a.erf", "override/mod/docs/readme.txt"]
+    # reversed, the exclude wins again
+    assert file not in installed(ops[::-1])
 
 
 def test_names_with_glob_characters_are_matched_literally() -> None:
     mapping = {"a/tex[1].dds": "1", "a/tex1.dds": "2"}
-    assert apply_ops(mapping, [PathOp("remove", "a/tex[1].dds")]) == {"a/tex1.dds": "2"}
-    assert apply_ops(mapping, [PathOp("rename", "a/tex[1].dds", "b.dds")]) == {
-        "a/tex1.dds": "2",
-        "b.dds": "1",
-    }
-    # rename never globs
-    assert apply_ops(mapping, [PathOp("rename", "a/*.dds", "b")]) == mapping
+    assert select(mapping, None, [PathOp("exclude", "a/tex[1].dds")])[0] == {"a/tex1.dds": "2"}
+    assert select(mapping, None, [PathOp("exclude", "a/*.dds")])[0] == {}  # a real glob
 
 
 def test_input_mapping_is_not_mutated() -> None:
     before = dict(MAPPING)
-    apply_ops(MAPPING, [PathOp("remove", "override")])
+    select(MAPPING, None, [PathOp("exclude", "override")])
     assert before == MAPPING
 
 
 @pytest.mark.parametrize(
     "op",
-    [
-        PathOp("rename", "a", "../outside"),
-        PathOp("rename", "a", "/abs/../.."),
-        PathOp("rename", "a"),
-        PathOp("remove", ".."),
-        PathOp("chmod", "a"),
-    ],
-)
+    [PathOp("exclude", ".."), PathOp("include", "/abs/../.."), PathOp("remove", "a"),
+     PathOp("rename", "a")],
+)  # fmt: skip
 def test_invalid_ops(op: PathOp) -> None:
     with pytest.raises(PathOpError):
-        apply_ops(MAPPING, [op])
+        select(MAPPING, None, [op])
 
 
 def test_resolve_uses_mod_ops() -> None:
-    mod = Mod(id="m", name="M", ops=[PathOp("remove", "packages/core/override/m/docs")])
-    assert resolve(mod, ["a.erf", "docs/readme.txt"]) == {"packages/core/override/m/a.erf": "a.erf"}
+    mod = Mod(id="m", name="M", ops=[PathOp("exclude", "packages/core/override/m/docs")])
+    assert resolve(mod, ["a.erf", "docs/x.erf"]) == {"packages/core/override/m/a.erf": "a.erf"}
+    # the ignore patterns leave the readme out, an include brings it back
+    mod.ops = [PathOp("include", "packages/core/override/m/readme.txt")]
+    assert resolve(mod, ["a.erf", "readme.txt"], IgnoreRules().matches) == {
+        "packages/core/override/m/a.erf": "a.erf",
+        "packages/core/override/m/readme.txt": "readme.txt",
+    }

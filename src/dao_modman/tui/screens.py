@@ -28,7 +28,7 @@ from textual.widgets.tree import TreeNode
 
 from ..core import deploy, nexus, opener, pathops, report
 from ..core.library import Library
-from ..core.models import OP_REMOVE, OP_RENAME, Mod, PathOp
+from ..core.models import OP_EXCLUDE, OP_INCLUDE, Mod, PathOp
 from ..core.moditems import ModItem
 from ..core.nexus import NexusClient, NexusError, NxmLink
 from ..core.overridepkg import OptionKey
@@ -550,9 +550,8 @@ class PathTree(Tree[str]):
             if dot > 0:
                 extension = self.get_component_rich_style("path-tree--extension", partial=True)
                 label.stylize(extension, dot, len(name))
-            if node.data in self.ignored:
-                ignored = self.get_component_rich_style("path-tree--ignored", partial=True)
-                label.stylize(ignored)
+        if node.data in self.ignored:  # a file left out, or a folder with only such files
+            label.stylize(self.get_component_rich_style("path-tree--ignored", partial=True))
         return Text.assemble((icon, base_style), label)
 
     def action_fold(self) -> None:
@@ -673,12 +672,20 @@ class ConflictsScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
+class PathOpsTree(PathTree):
+    """The path editor's tree: space includes or excludes the selected entry."""
+
+    BINDINGS = [Binding("space", "screen.toggle", "Include / exclude", show=False)]
+
+
 class PathOpsScreen(ModalScreen[list[PathOp] | None]):
-    """Edit the remove/rename operations of a mod on a preview of its target tree."""
+    """Choose which of a mod's files are installed: exclude or include files and folders.
+
+    The tree shows every file of the mod where it would go; what is left out, by an ignore
+    pattern or by the user, is dimmed and marked.
+    """
 
     BINDINGS = [
-        Binding("r,delete", "remove", "Remove"),
-        Binding("m", "rename", "Rename/move"),
         Binding("u", "undo", "Undo last"),
         Binding("c", "toggle_all", "Collapse/expand all"),
         Binding("slash", "filter", "Filter"),
@@ -699,28 +706,30 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         self.mod = mod
         self.base = base  # target -> source, ignored files included
         self.files_dir = files_dir  # where the sources are, for opening them
-        self.ignored = ignored or set()  # sources that are never deployed
-        self.sources: dict[str, str] = {}  # target -> source as shown, path operations applied
+        self.ignored = ignored or set()  # sources the ignore patterns leave out
         self.ops = list(mod.ops)
+        self.history: list[list[PathOp]] = []  # the operations before each change, for undo
+        self.left_out: set[str] = set()  # targets not installed
         self.filter = ""
         self.collapsed: set[str] = set()  # folders the user folded, kept across rebuilds
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog wide tall"):
-            yield Label(f"Paths of {self.mod.name}", classes="title", markup=False)
-            yield PathTree("Dragon Age/", id="targets")
+            yield Label(f"Files of {self.mod.name}", classes="title", markup=False)
+            yield PathOpsTree("Dragon Age/", id="targets")
             yield Input(placeholder="filter by part of a file or folder name", id="filter")
-            yield Static("", id="ops", markup=False)
             yield Label(
-                "[b]r[/] remove   [b]m[/] rename/move   [b]u[/] undo last   [b]o[/] open   "
-                "[b]/[/] filter   [b]\u2190 \u2192[/] fold   [b]c[/] fold all   [b]s[/] save   "
-                "[b]esc[/] cancel",
+                "[b]space[/] include/exclude   [b]u[/] undo   [b]o[/] open   [b]/[/] filter   "
+                "[b]\u2190 \u2192[/] fold   [b]c[/] fold all   [b]s[/] save   [b]esc[/] cancel",
                 classes="hint",
             )
 
     def on_mount(self) -> None:
         self.query_one("#filter").display = False
         self.rebuild()
+
+    def _left_out(self, ops: list[PathOp]) -> set[str]:
+        return set(pathops.select(self.base, self.ignored.__contains__, ops)[1])
 
     def _matches(self, target: str) -> bool:
         """A path is shown if the filter text occurs in one of its file or folder names."""
@@ -741,6 +750,13 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
 
         walk(tree.root)
 
+    def _below(self, path: str) -> list[str]:
+        """The files at or below a path."""
+        folded = path.casefold()
+        return [
+            t for t in self.base if t.casefold() == folded or t.casefold().startswith(folded + "/")
+        ]
+
     def rebuild(self, *, keep_folds: bool = True) -> None:
         tree = self.query_one("#targets", PathTree)
         selected = self._selected()
@@ -749,9 +765,16 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         tree.clear()
         tree.root.expand()
         nodes = {"": tree.root}
-        self.sources = pathops.apply_ops(self.base, self.ops)
-        tree.ignored = {t for t, source in self.sources.items() if source in self.ignored}
-        for target, source in self.sources.items():
+        self.left_out = self._left_out(self.ops)
+        # a folder counts as left out when no file below it is installed
+        with_installed = {
+            target.rsplit("/", depth)[0]
+            for target in self.base
+            if target not in self.left_out
+            for depth in range(1, target.count("/") + 1)
+        }
+        tree.ignored = self.left_out | (self._folders() - with_installed - {""})
+        for target, source in sorted(self.base.items()):
             if self.filter and not self._matches(target):
                 continue
             parts = target.split("/")
@@ -760,9 +783,12 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
                 if path not in nodes:
                     parent = nodes["/".join(parts[: depth - 1])]
                     expand = bool(self.filter) or path not in self.collapsed
-                    nodes[path] = parent.add(escape(parts[depth - 1]), data=path, expand=expand)
-            # a file deployed under another name than it has in the mod shows where it is from:
-            # the variant chosen for an option, or a file renamed by a path operation
+                    label = escape(parts[depth - 1])
+                    if path in tree.ignored:
+                        label += PathTree.IGNORED_MARK
+                    nodes[path] = parent.add(label, data=path, expand=expand)
+            # a file installed under another name than it has in the mod shows where it is
+            # from: the variant chosen for an option of an override package
             came_from = source.rpartition("/")[2]
             label = parts[-1]
             if came_from.casefold() != label.casefold():
@@ -776,8 +802,28 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         if selected:
             tree._tree_lines  # noqa: B018 - lays the new nodes out, so the cursor can go there
             tree.move_cursor(nodes[selected])
-        lines = [f"{i}. {op.describe()}" for i, op in enumerate(self.ops, 1)]
-        self.query_one("#ops", Static).update("\n".join(lines) or "No operations.")
+
+    def action_toggle(self) -> None:
+        """Exclude what is installed below the selection, or include it if all is left out.
+
+        Earlier operations on exactly this path are dropped first; a new one is only added
+        if it still changes something, so the operations stay few.
+        """
+        path = self._selected()
+        if not path:
+            return
+        files = self._below(path)
+        include = all(target in self.left_out for target in files)
+        ops = [op for op in self.ops if op.path.casefold() != path.casefold()]
+        left_out = self._left_out(ops)
+        done = (
+            not any(t in left_out for t in files) if include else all(t in left_out for t in files)
+        )
+        if not done:
+            ops.append(PathOp(OP_INCLUDE if include else OP_EXCLUDE, path))
+        self.history.append(self.ops)
+        self.ops = ops
+        self.rebuild()
 
     def action_toggle_all(self) -> None:
         tree = self.query_one("#targets", PathTree)
@@ -787,8 +833,7 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         self.rebuild(keep_folds=False)
 
     def _folders(self) -> set[str]:
-        targets = pathops.apply_ops(self.base, self.ops)
-        return {t.rsplit("/", i)[0] for t in targets for i in range(1, t.count("/") + 1)}
+        return {t.rsplit("/", i)[0] for t in self.base for i in range(1, t.count("/") + 1)}
 
     def action_filter(self) -> None:
         box = self.query_one("#filter", Input)
@@ -808,32 +853,9 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         node = self.query_one("#targets", PathTree).cursor_node
         return node.data if node is not None else None
 
-    def _add(self, op: PathOp) -> None:
-        try:
-            self.ops.append(pathops.validate(op))
-        except pathops.PathOpError as exc:
-            self.notify(str(exc), severity="error")
-            return
-        self.rebuild()
-
-    def action_remove(self) -> None:
-        if path := self._selected():
-            self._add(PathOp(OP_REMOVE, path))
-
-    def action_rename(self) -> None:
-        path = self._selected()
-        if not path:
-            return
-
-        def done(new_path: str | None) -> None:
-            if new_path and new_path != path:
-                self._add(PathOp(OP_RENAME, path, new_path))
-
-        self.app.push_screen(TextPromptScreen("Rename / move to", path), done)
-
     def action_open(self) -> None:
         """Open the selected file's copy in the library with the desktop's program for it."""
-        source = self.sources.get(self._selected() or "")
+        source = self.base.get(self._selected() or "")
         if source is None or self.files_dir is None:
             self.notify("Select a file to open")
             return
@@ -854,8 +876,8 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
             go()
 
     def action_undo(self) -> None:
-        if self.ops:
-            self.ops.pop()
+        if self.history:
+            self.ops = self.history.pop()
             self.rebuild()
 
     def action_save(self) -> None:

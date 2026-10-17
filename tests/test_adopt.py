@@ -7,7 +7,7 @@ import pytest
 
 from dao_modman.core import adopt, deploy
 from dao_modman.core.library import Library
-from dao_modman.core.models import KIND_DAZIP, KIND_OVERRIDE, KIND_PACKAGE, PathOp
+from dao_modman.core.models import KIND_DAZIP, KIND_OVERRIDE, KIND_PACKAGE
 
 OVERRIDE = "packages/core/override"
 ADDINS_XML = """<?xml version="1.0" encoding="utf-8"?>
@@ -99,16 +99,9 @@ def test_adopt_then_apply_restores_everything(library: Library, modded: Path) ->
     }
     assert mods["The Hand Made AddIn"].kind == KIND_DAZIP
     assert mods["The Hand Made AddIn"].version == "2.1"
-    # override files are plain loose-file mods, sent back to their folder where needed
-    assert mods["Better Hair"].kind == KIND_OVERRIDE
-    assert mods["Better Hair"].ops == [
-        PathOp("rename", f"{OVERRIDE}/better-hair", f"{OVERRIDE}/Better Hair")
-    ]
-    assert mods["amulet"].kind == KIND_OVERRIDE and mods["amulet"].ops == []
-    assert mods[adopt.LOOSE_NAME].kind == KIND_OVERRIDE
-    assert mods[adopt.LOOSE_NAME].ops == [
-        PathOp("rename", f"{OVERRIDE}/loose-override-files", OVERRIDE)
-    ]
+    # override files are plain loose-file mods, installed to their own folder like any mod
+    for name in ("Better Hair", "amulet", adopt.LOOSE_NAME):
+        assert mods[name].kind == KIND_OVERRIDE and mods[name].ops == []
     # files outside the override folder can only be placed by an override package
     assert mods["leftover"].kind == mods[adopt.OTHER_NAME].kind == KIND_PACKAGE
     assert all((library.dirs.downloads / mod.archive.file).is_file() for mod in result.mods)
@@ -130,10 +123,21 @@ def test_adopt_then_apply_restores_everything(library: Library, modded: Path) ->
     assert (modded / OVERRIDE).is_dir()  # the folders the game expects stay
     assert result.unregistered == ["hand_addin"] and registered(modded) == ["DAO_PRC_CP_1"]
 
-    # apply puts everything back where it was, now managed
+    # apply installs everything again, now managed: override files in their mod's folder
+    # (the game finds them by name), everything else exactly where it was
+    moved = {
+        f"{OVERRIDE}/Better Hair/": f"{OVERRIDE}/better-hair/",
+        f"{OVERRIDE}/loose.erf": f"{OVERRIDE}/loose-override-files/loose.erf",
+    }
+
+    def now(rel: str) -> str:
+        return next(
+            (new + rel[len(old) :] for old, new in moved.items() if rel.startswith(old)), rel
+        )
+
     plan = deploy.build_plan(library)
     deploy.apply(plan, modded, library.dirs.deployed_file)
-    assert {rel: (modded / rel).read_text() for rel in before} == before
+    assert {rel: (modded / now(rel)).read_text() for rel in before} == before
     assert sorted(registered(modded)) == ["DAO_PRC_CP_1", "hand_addin"]
     assert adopt.find(library, modded, library.dirs.deployed_file).groups == []
 

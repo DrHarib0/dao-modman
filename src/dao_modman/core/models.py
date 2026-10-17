@@ -11,22 +11,22 @@ KIND_OVERRIDE = "override"
 KIND_PACKAGE = "package"  # override package(s) in DAO-Modmanager's .override format
 KIND_MIXED = "mixed"  # more than one of: dazips, override packages, loose override files
 
-OP_REMOVE = "remove"
-OP_RENAME = "rename"
+OP_EXCLUDE = "exclude"  # do not install
+OP_INCLUDE = "include"  # install, although an ignore pattern would leave it out
 
 
 @dataclass(frozen=True)
 class PathOp:
-    """One user edit of a mod's target paths (relative to the game user dir)."""
+    """The user's decision about some of a mod's files: leave them out, or install them.
+
+    `path` is a target path (relative to the game user dir): a file, a folder or a glob.
+    """
 
     op: str
     path: str
-    to: str | None = None
 
     def describe(self) -> str:
-        if self.op == OP_RENAME:
-            return f"rename {self.path} -> {self.to}"
-        return f"remove {self.path}"
+        return f"{self.op} {self.path}"
 
 
 @dataclass

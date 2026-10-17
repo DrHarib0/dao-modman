@@ -139,19 +139,18 @@ def test_path_operations_apply_after_options(tmp_path: Path, library: Library) -
     mod = library.import_archive(make_override(tmp_path / "Bodies.override"))
     body = library.options(mod)[0].keys[0]
     mod.ops = [
-        PathOp("rename", f"{BASE}/hf_body.msh", f"{BASE}/renamed.msh"),
-        PathOp("remove", f"{BASE}/hf_skin.dds"),
-        PathOp("remove", f"{BASE}/Variants"),  # the variants are not in the list: no effect
+        PathOp("exclude", f"{BASE}/hf_skin.dds"),
+        PathOp("exclude", f"{BASE}/Variants"),  # the variants are not in the list: no effect
     ]
     assert contents(library, mod) == {
-        "renamed.msh": "medium body",
+        "hf_body.msh": "medium body",
         "ef_ears.msh": "long ears",
         "other.mao": "plain file",
     }
-    # changing the choice changes the content behind the op's path, not the op
+    # changing the choice changes the content behind a path, not the ops
     library.set_option(mod, body, "Big")
-    assert contents(library, mod)["renamed.msh"] == "big body"
-    assert len(mod.ops) == 3
+    assert contents(library, mod)["hf_body.msh"] == "big body"
+    assert len(mod.ops) == 2
 
 
 def test_missing_variant_keeps_the_original_and_warns(tmp_path: Path, library: Library) -> None:
