@@ -134,19 +134,31 @@ are not on it.
 - `chargenmorphcfg.xml` is the exception: when several enabled mods ship one, their entries
   are merged into a single `packages/core/override/chargenmorphcfg.xml` (what the
   CharGenMorph Compiler does) and the individual copies are not deployed.
-- Every deployed file is recorded with its SHA-256. A file that already exists in the game
-  directory is never overwritten; apply reports how many it left untouched.
-- **Apply is all or nothing.** Before copying, it notes what it is about to create. If it
-  fails, everything from that run is removed again and nothing is applied; if the process is
-  killed, the next start rolls the unfinished run back the same way. (Apply first removes the
-  previous deployment, so after a failure that one is gone too.) Apply and unapply show a
-  progress dialog and cannot be interrupted from the keyboard.
+- Every deployed file is recorded with its SHA-256, size and time, and with what it was
+  made from (the mod's file, or the merged content). A file that already exists in the game
+  directory is never overwritten; apply names the ones it left untouched.
+- **Apply only changes what differs** from the last apply. Files still wanted as they are
+  stay untouched; files no longer wanted, or wanted differently (another mod wins, a path
+  operation moved them, the mod was updated, another texture size limit), are removed; new
+  ones are written. Enabling one mod copies just its files. A deployed file changed by hand
+  since is left alone and no longer counts as dao-modman's. The apply dialog and the result
+  say how many files are written, removed and unchanged. A record from a version before
+  this is checked by content on the first apply, which reads every applied file once.
+- Once something is applied, the Notes column says what apply would do for a mod: **not
+  applied**, **changed** (its files differ from what is applied) or **still applied** (it is
+  disabled, but its files are in the game); the status line counts these mods.
+- **Apply is all or nothing.** Before changing anything, it notes what it is about to do. If
+  it fails, every file of dao-modman's is removed and nothing is applied (files changed by
+  hand and files of others are never touched); if the process is killed, the next start
+  rolls the unfinished run back the same way. Apply and unapply show a progress dialog and
+  cannot be interrupted from the keyboard.
 - **Unapply** removes the files it applied that are still unchanged. If the mod directories
   (`packages/` and `AddIns/` in the game's user dir) contain anything else, such as files
   changed since, files installed by hand or by another tool, or AddIns those registered, it
   asks: `y` removes everything (cannot be undone), `o` only dao-modman's files, `n` cancels.
   Official DLC stored there is never touched.
-- dazip AddIns are added to / removed from `Settings/AddIns.xml`.
+- dazip AddIns are added to `Settings/AddIns.xml`, and removed when their mod is disabled
+  or unapplied.
 
 ### Override packages
 
@@ -264,8 +276,9 @@ library copy matches its original are the originals removed and the AddIns unreg
 anything fails, the new mods are removed again and the game dir is left as it was. The game
 then lacks those files until the next apply, which the TUI offers right away.
 
-Symbolic links and ignored files (`Thumbs.db` ...) are left where they are. Official DLC is
-never touched. `AddIns.xml` does not record which AddIns came from one dazip, so a mod made
+Ignored files (readmes, `Thumbs.db` ...) inside an adopted folder go into the library with
+it, like any mod's readme, and are not installed again. Other ignored files and symbolic links
+are left where they are, and do not trigger the startup notice. Official DLC is never touched. `AddIns.xml` does not record which AddIns came from one dazip, so a mod made
 of several AddIns, like The Winter Forge, becomes several mods.
 
 ## Library revisions

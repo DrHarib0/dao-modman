@@ -192,6 +192,7 @@ class ModManApp(App[None]):
         self.account: dict | None = None
         self.updates: set[str] = set()
         self.foreign: list[tuple[str, Path]] = []  # files in the mod dirs we do not manage
+        self._pending = 0  # mods whose files differ from the last apply
         self.filter_text = ""  # only rows whose name or group contains it are shown
         self._row_ids: list[str | None] = []  # the mod of each table row; None: official DLC
         self._busy = False  # a long operation is running behind a progress dialog
@@ -230,12 +231,7 @@ class ModManApp(App[None]):
         self.refresh_foreign()  # after the rollback: an unfinished apply's files are not foreign
         if self.foreign:
             self.refresh_table()
-            self.notify(
-                f"{len(self.foreign)} file(s) in the mod directories are not managed by"
-                " dao-modman: t → Adopt takes them over",
-                timeout=10,
-                markup=False,
-            )
+            self.notify_adoptable()
         if self.nexus:
             self.load_account()
         await self.listen()
@@ -318,9 +314,12 @@ class ModManApp(App[None]):
         try:
             plan = deploy.build_plan(self.library, self.foreign)
             conflicting, misordered = plan.conflicting_mods(), plan.misordered_mods()
+            record = self._record()  # while nothing is applied, the status line says so
+            states = deploy.compare(plan, record, self.foreign).mods if record else {}
         except (pathops.PathOpError, OSError) as exc:
-            conflicting, misordered = set(), set()
+            conflicting, misordered, states = set(), set(), {}
             self.notify(str(exc), severity="error", markup=False)
+        self._pending = sum(state != deploy.APPLIED for state in states.values())
         ordered = self.library.ordered()
         if select and not any(self._matches(m.name, e.group) for e, m in ordered if m.id == select):
             self._set_filter("")  # never hide the mod that was just added or changed
@@ -342,6 +341,7 @@ class ModManApp(App[None]):
             notes = [
                 note
                 for note, active in (
+                    (states.get(mod.id, ""), states.get(mod.id, deploy.APPLIED) != deploy.APPLIED),
                     ("wrong order", mod.id in misordered),
                     ("conflict", entry.enabled and mod.id in conflicting),
                     ("update", mod.id in self.updates),
@@ -392,7 +392,12 @@ class ModManApp(App[None]):
         else:
             kind = "premium" if self.account.get("is_premium") else "free"
             account = f"{self.account.get('name', '?')} ({kind})"
-        deployed = "yes" if self.config.dirs.deployed_file.exists() else "no"
+        if not self.config.dirs.deployed_file.exists():
+            deployed = "no"
+        elif self._pending:
+            deployed = f"yes, {self._pending} mod(s) to apply"
+        else:
+            deployed = "yes, up to date"
         status = f"Nexus: {account}  |  Applied: {deployed}"
         if not self.config.game_user_dir:  # worth a place only while it is a problem
             status = f"Game user dir not found (set it in config.toml)  |  {status}"
@@ -402,6 +407,13 @@ class ModManApp(App[None]):
                 f"Filter: {self.filter_text} ({shown} of {len(self.library.mods)})  |  {status}"
             )
         self.query_one("#status", Static).update(status)
+
+    def _record(self) -> dict | None:
+        """The last apply's record; None if nothing is applied or it cannot be read."""
+        try:
+            return deploy.load_record(self.config.dirs.deployed_file)
+        except deploy.DeployError:
+            return None
 
     def current_entry(self) -> ProfileEntry | None:
         row = self.query_one("#mods", DataTable).cursor_row
@@ -724,7 +736,11 @@ class ModManApp(App[None]):
         except (pathops.PathOpError, MetadataError, OSError) as exc:
             self.error(exc)
             return
-        lines = [f"Apply {len(plan.files)} file(s) to\n{user_dir} ?"]
+        changes = deploy.compare(plan, self._record(), self.foreign)
+        lines = [
+            f"Apply to\n{user_dir} ?\n\n{changes.write} file(s) to write, {changes.remove} to"
+            f" remove, {changes.unchanged} unchanged"
+        ]
         lines += [f"\nwarning: {warning}" for warning in plan.warnings]
         lines += [
             f"\n{target}\n  merged from: {', '.join(mods)}" for target, mods in plan.merged.items()
@@ -801,7 +817,14 @@ class ModManApp(App[None]):
         finally:
             self.refresh_status()
         revisions.snapshot(self.config.dirs.data, f"apply: {result.written} files")
-        message = f"Applied {result.written} file(s)"
+        message = (
+            f"Applied: wrote {result.written} file(s), removed {result.removed},"
+            f" {result.unchanged} unchanged"
+        )
+        if result.kept:
+            message += f", left {len(result.kept)} file(s) changed by hand alone"
+        if result.unregistered:
+            message += f", unregistered {', '.join(result.unregistered)}"
         self.refresh_foreign()
         self.refresh_table()
         if result.skipped:
@@ -971,6 +994,25 @@ class ModManApp(App[None]):
         except (deploy.DeployError, addins.AddInsError, OSError) as exc:
             self.foreign = []
             self.error(exc)
+
+    def notify_adoptable(self) -> None:
+        """Point to adopt if it has something to take over (not just ignored files or links)."""
+        user_dir = self.config.game_user_dir
+        if not user_dir:
+            return
+        try:
+            found = adopt.find(
+                self.library, user_dir, self.config.dirs.deployed_file, self.config.game_install_dir
+            )
+        except (deploy.DeployError, addins.AddInsError, OSError):
+            return  # refresh_foreign has reported it
+        if found.file_count:
+            self.notify(
+                f"{found.file_count} file(s) in the mod directories are not managed by"
+                " dao-modman: t → Adopt takes them over",
+                timeout=10,
+                markup=False,
+            )
 
     @work(exclusive=True, group="adopt")
     async def start_adopt(self) -> None:

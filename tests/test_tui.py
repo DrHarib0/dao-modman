@@ -8,6 +8,7 @@ import httpx2
 import pytest
 from textual.widgets import DataTable, Input, Label, OptionList, Static, Tree
 
+from dao_modman.core import deploy
 from dao_modman.core.config import Config
 from dao_modman.core.library import Library
 from dao_modman.core.models import PathOp
@@ -1324,7 +1325,7 @@ async def test_adopt_files_installed_by_hand(tmp_path: Path, dirs: Dirs, user_di
             pilot,
             lambda: (
                 isinstance(app.screen, ConfirmScreen)
-                and app.screen.message.startswith("Apply 1 file")
+                and "1 file(s) to write, 0 to remove, 0 unchanged" in app.screen.message
             ),
         )
         await pilot.press("y")
@@ -1352,3 +1353,39 @@ async def test_apply_names_the_files_it_left_alone(
             for n in app._notifications
         )
     assert taken.read_text() == "by hand"
+
+
+async def test_notes_show_what_apply_would_change(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    library = Library(dirs)
+    library.import_archive(make_zip(tmp_path / "old.zip", {"a.erf": "a"}))
+    deploy.apply(deploy.build_plan(library), user_dir, dirs.deployed_file)
+    library.import_archive(make_zip(tmp_path / "new.zip", {"b.erf": "b"}))
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        assert [row[-1] for row in rows(app)] == ["", "not applied"]
+        assert "Applied: yes, 1 mod(s) to apply" in str(app.query_one("#status", Static).render())
+        await pilot.press("space")  # disable the applied one
+        assert [row[-1] for row in rows(app)] == ["still applied", "not applied"]
+
+        await pilot.press("a")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        assert "1 file(s) to write, 1 to remove, 0 unchanged" in app.screen.message
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        assert [row[-1] for row in rows(app)] == ["", ""]
+        assert "Applied: yes, up to date" in str(app.query_one("#status", Static).render())
+        assert any(
+            "wrote 1 file(s), removed 1, 0 unchanged" in n.message for n in app._notifications
+        )
+
+
+async def test_no_notice_for_ignored_files_only(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
+    readme = user_dir / OVERRIDE / "some-mod/readme.txt"
+    readme.parent.mkdir(parents=True)
+    readme.write_text("left behind")
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)):
+        assert app.foreign  # it is not ours ...
+        assert not any("not managed" in n.message for n in app._notifications)  # ... but no notice

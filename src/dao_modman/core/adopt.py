@@ -57,13 +57,15 @@ class Group:
     files: list[tuple[str, Path]] = field(default_factory=list)  # (path below user dir, file)
     addin: AddIn | None = None  # a registered AddIn: the group becomes a dazip
     folder: str | None = None  # override files: the folder they are in, below the user dir
+    # ignored files (readmes, Thumbs.db): taken along into the library, never deployed
+    extras: list[tuple[str, Path]] = field(default_factory=list)
 
 
 @dataclass
 class Found:
     groups: list[Group] = field(default_factory=list)
     links: list[str] = field(default_factory=list)  # symbolic links: never adopted
-    ignored: list[str] = field(default_factory=list)  # matched by the ignore rules: left alone
+    ignored: list[str] = field(default_factory=list)  # ignored, with no group to go with
 
     @property
     def file_count(self) -> int:
@@ -88,12 +90,10 @@ def find(
     }
     found = Found()
     groups: dict[tuple[str, ...], Group] = {}
+    extras: dict[tuple[str, ...], list[tuple[str, Path]]] = {}
     for rel, path in deploy.unmanaged(user_dir, deployed_file, install_dir):
         if path.is_symlink():
             found.links.append(rel)
-            continue
-        if library.ignore.matches(rel):
-            found.ignored.append(rel)
             continue
         parts = rel.split("/")
         folded = tuple(part.casefold() for part in parts)
@@ -108,8 +108,16 @@ def find(
             key, name, addin = ("addin", folded[1]), parts[1], external.get(folded[1])
         else:
             key, name, addin = ("other",), OTHER_NAME, None
+        if library.ignore.matches(rel):
+            extras.setdefault(key, []).append((rel, path))
+            continue
         group = groups.setdefault(key, Group(name, addin=addin, folder=folder))
         group.files.append((rel, path))
+    for key, files in extras.items():
+        if key in groups:  # e.g. the readme of an adopted folder: it goes along
+            groups[key].extras = files
+        else:
+            found.ignored += [rel for rel, _path in files]
     found.groups = list(groups.values())
     return found
 
@@ -140,12 +148,12 @@ def pack(group: Group, archive: Path) -> None:
     """Write the group as loose override files, a dazip or an override package."""
     with zipfile.ZipFile(archive, "x") as zf:  # stored: the files are often compressed already
         if group.folder is not None:
-            for rel, path in group.files:
+            for rel, path in [*group.files, *group.extras]:
                 zf.write(path, rel[len(group.folder) + 1 :])
             return
         prefix = "Contents" if group.addin is not None else PAYLOAD
         zf.writestr("Manifest.xml", _manifest(group))
-        for rel, path in group.files:
+        for rel, path in [*group.files, *group.extras]:
             zf.write(path, f"{prefix}/{rel}")
 
 
@@ -173,7 +181,7 @@ def _remove_originals(user_dir: Path, groups: list[Group]) -> int:
     removed = 0
     folders: set[Path] = set()
     for group in groups:
-        for _rel, path in group.files:
+        for _rel, path in [*group.files, *group.extras]:
             path.unlink()
             removed += 1
             folders.update(path.parents)
@@ -242,10 +250,12 @@ def describe(found: Found) -> str:
         kind = "AddIn" if group.addin is not None else "files"
         label = group.addin.name if group.addin is not None else group.name
         lines.append(f"  {label} ({kind}, {len(group.files)} file(s))")
+    if extras := sum(len(group.extras) for group in found.groups):
+        lines.append(f"\n{extras} ignored file(s) (readmes etc.) go along, not to be installed.")
     if found.links:
-        lines.append(f"\n{len(found.links)} symbolic link(s) are left alone.")
+        lines.append(f"{len(found.links)} symbolic link(s) are left alone.")
     if found.ignored:
-        lines.append(f"{len(found.ignored)} ignored file(s) (Thumbs.db etc.) are left alone.")
+        lines.append(f"{len(found.ignored)} other ignored file(s) are left alone.")
     lines += [
         "",
         "The originals are removed once the library copies are checked; apply installs",

@@ -41,7 +41,8 @@ def modded(tmp_path: Path, user_dir: Path) -> Path:
     write(user_dir / "AddIns/leftover/core/old.erf", "unregistered AddIn folder")
     write(user_dir / "packages/core/data/fonts.erf", "font")
     write(user_dir / "AddIns/DAO_PRC_CP_1/module/dlc.erf", "official")
-    write(user_dir / f"{OVERRIDE}/Better Hair/Thumbs.db", "junk")
+    write(user_dir / f"{OVERRIDE}/Better Hair/Thumbs.db", "junk")  # goes along with its folder
+    write(user_dir / f"{OVERRIDE}/Junk/desktop.ini", "only ignored files here")
     target = write(tmp_path / "elsewhere.erf", "outside")
     (user_dir / f"{OVERRIDE}/link.erf").symlink_to(target)
     write(user_dir / "Settings/AddIns.xml", ADDINS_XML)
@@ -68,16 +69,21 @@ def test_find_groups(library: Library, modded: Path) -> None:
     assert by_name["hand_addin"].addin is not None  # registered: becomes a dazip
     assert by_name["leftover"].addin is None
     assert found.links == [f"{OVERRIDE}/link.erf"]
-    assert found.ignored == [f"{OVERRIDE}/Better Hair/Thumbs.db"]
+    assert by_name["Better Hair"].extras == [
+        (f"{OVERRIDE}/Better Hair/Thumbs.db", modded / f"{OVERRIDE}/Better Hair/Thumbs.db")
+    ]
+    assert found.ignored == [f"{OVERRIDE}/Junk/desktop.ini"]  # no group to go with
     text = adopt.describe(found)
     assert "The Hand Made AddIn (AddIn, 1 file(s))" in text and "Better Hair (files" in text
+    assert "1 ignored file(s) (readmes etc.) go along" in text
+    assert "1 other ignored file(s) are left alone" in text
 
 
 def test_adopt_then_apply_restores_everything(library: Library, modded: Path) -> None:
     before = {
         rel: path.read_text()
         for rel, path in deploy.unmanaged(modded, library.dirs.deployed_file)
-        if not path.is_symlink() and not rel.endswith("Thumbs.db")
+        if not path.is_symlink() and not rel.endswith((".db", ".ini"))
     }
     found = adopt.find(library, modded, library.dirs.deployed_file)
     result = adopt.adopt(library, modded, found)
@@ -110,13 +116,16 @@ def test_adopt_then_apply_restores_everything(library: Library, modded: Path) ->
     assert [entry.id for entry in library.profile.mods] == [mod.id for mod in result.mods]
     assert all(entry.enabled for entry in library.profile.mods)
 
-    # the originals are gone, the official DLC, the link and the junk are not
-    assert result.removed == len(before)
+    # the originals are gone, with the junk of their folder; the official DLC, the link and
+    # the lone junk are not
+    assert result.removed == len(before) + 1
     assert not any((modded / rel).exists() for rel in before)
     assert not (modded / f"{OVERRIDE}/loose.erf").exists()
     assert (modded / "AddIns/DAO_PRC_CP_1/module/dlc.erf").is_file()
     assert (modded / f"{OVERRIDE}/link.erf").is_symlink()
-    assert (modded / f"{OVERRIDE}/Better Hair/Thumbs.db").is_file()
+    assert not (modded / f"{OVERRIDE}/Better Hair").exists()
+    assert (library.files_dir(mods["Better Hair"].id) / "Thumbs.db").is_file()  # in the library
+    assert (modded / f"{OVERRIDE}/Junk/desktop.ini").is_file()
     assert not (modded / "AddIns/hand_addin").exists()  # emptied folders are removed
     assert (modded / OVERRIDE).is_dir()  # the folders the game expects stay
     assert result.unregistered == ["hand_addin"] and registered(modded) == ["DAO_PRC_CP_1"]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -420,7 +421,7 @@ def test_apply_cut_short_is_rolled_back_on_the_next_run(
     intent = {
         **complete,
         "state": "applying",
-        "files": [{"path": f["path"]} for f in complete["files"]],
+        "files": [{"path": f["path"], "new": True} for f in complete["files"]],
     }
     deployed.write_text(json.dumps(intent))
     (user_dir / OVERRIDE / "one/b.erf").unlink()
@@ -452,7 +453,11 @@ def test_progress_and_folder_casing(tmp_path: Path, library: Library, user_dir: 
     deploy.apply(deploy.build_plan(library), user_dir, deployed, lambda *step: seen.append(step))
     # both mods end up in one folder although it did not exist before either was copied
     assert tree(user_dir) == ["extra/Shared/one.erf", "extra/Shared/two.erf"]
-    assert seen == [("Copying files", 1, 2), ("Copying files", 2, 2)]
+    assert [step for step in seen if step[0] == "Copying files"] == [
+        ("Copying files", 1, 2),
+        ("Copying files", 2, 2),
+    ]
+    assert ("Comparing with the last apply", 2, 2) in seen
 
     seen.clear()
     deploy.unapply(deployed, lambda *step: seen.append(step))
@@ -547,3 +552,162 @@ def test_foreign_files_show_up_in_conflicts(
     assert "#1 hair  <  not managed by dao-modman   (1 file)" in text
     assert f"not managed by dao-modman   {OVERRIDE}/hand/" in text
     assert report.select_conflicts(plan, []) == ([], [])  # cannot be accepted
+
+
+def mtimes(root: Path) -> dict[str, int]:
+    return {
+        p.relative_to(root).as_posix(): p.stat().st_mtime_ns for p in root.rglob("*") if p.is_file()
+    }
+
+
+def test_apply_only_touches_what_changed(tmp_path: Path, library: Library, user_dir: Path) -> None:
+    deployed = library.dirs.deployed_file
+    one = library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a", "sub/b.erf": "b"}))
+    two = library.import_archive(make_zip(tmp_path / "two.zip", {"c.erf": "c"}))
+    library.profile.entry(two.id).enabled = False
+
+    plan = deploy.build_plan(library)
+    assert deploy.compare(plan, None).mods == {"one": deploy.NOT_APPLIED}
+    result = deploy.apply(plan, user_dir, deployed)
+    assert (result.written, result.removed, result.unchanged) == (2, 0, 0)
+    before = mtimes(user_dir)
+
+    # nothing changed: nothing is written
+    plan = deploy.build_plan(library)
+    record = deploy.load_record(deployed)
+    comparison = deploy.compare(plan, record)
+    assert comparison.mods == {"one": deploy.APPLIED} and comparison.pending == []
+    assert (comparison.write, comparison.remove, comparison.unchanged) == (0, 0, 2)
+    result = deploy.apply(plan, user_dir, deployed)
+    assert (result.written, result.removed, result.unchanged) == (0, 0, 2)
+    assert mtimes(user_dir) == before
+
+    # enabling a mod writes only its files
+    library.profile.entry(two.id).enabled = True
+    plan = deploy.build_plan(library)
+    assert deploy.compare(plan, deploy.load_record(deployed)).mods == {
+        "one": deploy.APPLIED,
+        "two": deploy.NOT_APPLIED,
+    }
+    result = deploy.apply(plan, user_dir, deployed)
+    assert (result.written, result.removed, result.unchanged) == (1, 0, 2)
+    assert {k: v for k, v in mtimes(user_dir).items() if k in before} == before
+
+    # a path operation moves a file: the old copy goes, the new one is written
+    one.ops = [PathOp("rename", f"{OVERRIDE}/one/sub", f"{OVERRIDE}/one/moved")]
+    plan = deploy.build_plan(library)
+    assert deploy.compare(plan, deploy.load_record(deployed)).mods["one"] == deploy.CHANGED
+    result = deploy.apply(plan, user_dir, deployed)
+    assert (result.written, result.removed, result.unchanged) == (1, 1, 2)
+    assert not (user_dir / OVERRIDE / "one/sub").exists()  # the emptied folder went too
+    assert (user_dir / OVERRIDE / "one/moved/b.erf").read_text() == "b"
+
+    # a library file with new content (an update) is written again
+    source = library.files_dir(two.id) / "c.erf"
+    source.write_text("c2")
+    os.utime(source, ns=(1, 1))
+    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert (result.written, result.removed) == (1, 1)
+    assert (user_dir / OVERRIDE / "two/c.erf").read_text() == "c2"
+
+    # disabling a mod removes only its files, and its folder
+    library.profile.entry(one.id).enabled = False
+    plan = deploy.build_plan(library)
+    assert deploy.compare(plan, deploy.load_record(deployed)).mods == {
+        "one": deploy.STILL_APPLIED,
+        "two": deploy.APPLIED,
+    }
+    result = deploy.apply(plan, user_dir, deployed)
+    assert (result.written, result.removed, result.unchanged) == (0, 2, 1)
+    assert tree(user_dir) == [f"{OVERRIDE}/two/c.erf"]
+    assert not (user_dir / OVERRIDE / "one").exists()
+
+
+def test_files_changed_by_hand_are_left_alone(
+    tmp_path: Path, library: Library, user_dir: Path
+) -> None:
+    deployed = library.dirs.deployed_file
+    mod = library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a", "b.erf": "b"}))
+    deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    edited = user_dir / OVERRIDE / "one/a.erf"
+    edited.write_text("edited by hand")
+
+    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert result.kept == [f"{OVERRIDE}/one/a.erf"] and result.written == 0
+    assert edited.read_text() == "edited by hand"
+    assert [item["path"] for item in deploy.load_record(deployed)["files"]] == [
+        f"{OVERRIDE}/one/b.erf"
+    ]  # no longer ours
+    # from now on it is a file we did not write: skipped
+    assert deploy.apply(deploy.build_plan(library), user_dir, deployed).skipped == [
+        f"{OVERRIDE}/one/a.erf"
+    ]
+    library.profile.entry(mod.id).enabled = False
+    deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert tree(user_dir) == [f"{OVERRIDE}/one/a.erf"]  # ours removed, theirs kept
+
+
+def test_addin_of_a_disabled_mod_is_unregistered(
+    tmp_path: Path, library: Library, user_dir: Path
+) -> None:
+    deployed = library.dirs.deployed_file
+    first = library.import_archive(make_dazip(tmp_path / "first.dazip", "first_uid", "First"))
+    library.import_archive(make_dazip(tmp_path / "second.dazip", "second_uid", "Second"))
+    deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert addin_uids(user_dir) == ["first_uid", "second_uid"]
+
+    library.profile.entry(first.id).enabled = False
+    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert result.unregistered == ["first_uid"] and result.addins == []
+    assert addin_uids(user_dir) == ["second_uid"]
+    assert deploy.load_record(deployed)["addins"] == ["second_uid"]
+
+
+def test_failed_incremental_apply_leaves_nothing_applied(
+    tmp_path: Path, library: Library, user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    deployed = library.dirs.deployed_file
+    library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a", "b.erf": "b"}))
+    deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    (user_dir / OVERRIDE / "one/b.erf").write_text("edited by hand")
+    two = library.import_archive(make_zip(tmp_path / "two.zip", {"c.erf": "c", "d.erf": "d"}))
+
+    real_write = deploy._write_hashed
+    written: list[Path] = []
+
+    def fail_second(planned, dest):
+        if written:
+            raise OSError("disk full")
+        written.append(dest)
+        return real_write(planned, dest)
+
+    monkeypatch.setattr(deploy, "_write_hashed", fail_second)
+    with pytest.raises(deploy.DeployError, match="rolled back: disk full"):
+        deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    # ours are gone, kept or new; the file changed by hand survives
+    assert tree(user_dir) == [f"{OVERRIDE}/one/b.erf"] and not deployed.exists()
+    assert two.id in library.mods
+
+
+def test_record_without_signatures_is_checked_once(
+    tmp_path: Path, library: Library, user_dir: Path
+) -> None:
+    """A record from before signatures existed: checked by content, not rewritten."""
+    deployed = library.dirs.deployed_file
+    one = library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a", "b.erf": "b"}))
+    deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    before = mtimes(user_dir)
+    record = json.loads(deployed.read_text())
+    record["files"] = [{k: item[k] for k in ("path", "mod", "sha256")} for item in record["files"]]
+    deployed.write_text(json.dumps(record))
+    # the mod's b.erf changed since that apply: only it is written again
+    (library.files_dir(one.id) / "b.erf").write_text("b2")
+
+    plan = deploy.build_plan(library)
+    assert deploy.compare(plan, record).mods == {"one": deploy.APPLIED}  # applied, as far as known
+    result = deploy.apply(plan, user_dir, deployed)
+    assert (result.written, result.removed, result.unchanged) == (1, 1, 1)
+    assert mtimes(user_dir)[f"{OVERRIDE}/one/a.erf"] == before[f"{OVERRIDE}/one/a.erf"]
+    upgraded = deploy.load_record(deployed)["files"]
+    assert all("source" in item and "size" in item for item in upgraded)
+    assert deploy.apply(deploy.build_plan(library), user_dir, deployed).unchanged == 2

@@ -7,7 +7,7 @@ import hashlib
 import json
 import os
 import xml.etree.ElementTree as ET
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -49,6 +49,20 @@ class PlannedFile:
     mod_id: str
     content: bytes | None = None  # generated file: written instead of copying `source`
     reduction: Reduction | None = None  # texture to be written smaller than `source`
+
+    def signature(self) -> str:
+        """What the plan wants at the target, before texture limits and item tables.
+
+        A library file never changes in place (an update replaces it), so its path, size and
+        modification time identify its content. Merged files are identified by their content.
+        """
+        if self.mod_id == MERGED and self.content is not None:
+            return "content:" + hashlib.sha256(self.content).hexdigest()
+        try:
+            stat = self.source.stat()
+        except OSError:
+            return f"{self.mod_id}:{self.source}:missing"
+        return f"{self.mod_id}:{self.source}:{stat.st_size}:{stat.st_mtime_ns}"
 
 
 OPEN = "open"  # an ordinary conflict
@@ -112,8 +126,12 @@ class Plan:
 @dataclass
 class ApplyResult:
     written: int = 0
+    removed: int = 0  # files of ours that are no longer wanted, or wanted differently
+    unchanged: int = 0  # already applied as planned: not touched
     skipped: list[str] = field(default_factory=list)  # already existed, left alone
-    addins: list[str] = field(default_factory=list)
+    kept: list[str] = field(default_factory=list)  # applied by us, changed since: left alone
+    addins: list[str] = field(default_factory=list)  # registered by this run
+    unregistered: list[str] = field(default_factory=list)  # of disabled mods
 
 
 @dataclass
@@ -274,22 +292,34 @@ def _save_record(deployed_file: Path, record: dict) -> None:
     write_atomic(deployed_file, json.dumps(record, indent=1).encode())
 
 
+def _chunks(planned: PlannedFile) -> Iterator[bytes]:
+    """The bytes a planned file is written as."""
+    if planned.content is not None:
+        yield planned.content
+        return
+    with planned.source.open("rb") as src:
+        if planned.reduction is not None:
+            yield planned.reduction.header
+            src.seek(planned.reduction.offset)
+        while chunk := src.read(_CHUNK):
+            yield chunk
+
+
 def _write_hashed(planned: PlannedFile, dest: Path) -> str:
     digest = hashlib.sha256()
     # "xb": never overwrite a file that appeared in the meantime
     with dest.open("xb") as out:
-        if planned.content is not None:
-            digest.update(planned.content)
-            out.write(planned.content)
-            return digest.hexdigest()
-        with planned.source.open("rb") as src:
-            if planned.reduction is not None:
-                digest.update(planned.reduction.header)
-                out.write(planned.reduction.header)
-                src.seek(planned.reduction.offset)
-            while chunk := src.read(_CHUNK):
-                digest.update(chunk)
-                out.write(chunk)
+        for chunk in _chunks(planned):
+            digest.update(chunk)
+            out.write(chunk)
+    return digest.hexdigest()
+
+
+def _output_sha256(planned: PlannedFile) -> str:
+    """The SHA-256 the planned file would be written with, without writing it."""
+    digest = hashlib.sha256()
+    for chunk in _chunks(planned):
+        digest.update(chunk)
     return digest.hexdigest()
 
 
@@ -330,15 +360,39 @@ def _missing_dirs(user_dir: Path, paths: list[Path]) -> list[str]:
     return [path.relative_to(user_dir).as_posix() for path in missing]
 
 
-def _undo(record: dict) -> None:
-    """Remove everything an unfinished apply set out to create.
+def _on_disk(item: dict, path: Path) -> str:
+    """Whether a recorded file is still as we wrote it: "same", "missing" or "modified"."""
+    if path.is_symlink():
+        return "modified"
+    try:
+        stat = path.stat()
+    except OSError:
+        return "missing"
+    if (stat.st_size, stat.st_mtime_ns) == (item.get("size"), item.get("mtime_ns")):
+        return "same"
+    if item.get("sha256") and sha256_file(path) == item["sha256"]:
+        return "same"  # touched, or recorded before sizes were: the content is ours
+    return "modified"
 
-    Every listed path was absent when that run started, so nothing foreign is touched.
+
+def _stat(path: Path) -> dict:
+    stat = path.stat()
+    return {"size": stat.st_size, "mtime_ns": stat.st_mtime_ns}
+
+
+def _undo(record: dict) -> None:
+    """Remove everything an unfinished apply was setting up, leaving nothing applied.
+
+    Files marked `new` were absent when that run started; the others are only removed while
+    they are still as we wrote them, so nothing foreign or changed by hand is touched.
     """
     user_dir = Path(record["user_dir"])
     for item in record.get("files", []):
         path = user_dir / normalize_rel(item["path"])
-        if path.is_file() or path.is_symlink():
+        if item.get("new"):
+            if path.is_file() or path.is_symlink():
+                path.unlink()
+        elif _on_disk(item, path) == "same":
             path.unlink()
     for rel in sorted(record.get("dirs", []), key=lambda d: d.count("/"), reverse=True):
         with contextlib.suppress(OSError):  # not empty or never created
@@ -358,50 +412,129 @@ def rollback(deployed_file: Path) -> bool:
     return True
 
 
-def apply(
-    plan: Plan, user_dir: Path, deployed_file: Path, progress: Progress | None = None
-) -> ApplyResult:
-    """Replace the current deployment (if any) with `plan`, all or nothing.
+def _reduced(planned: PlannedFile) -> list[int] | None:
+    """The size a texture is written at, if it is reduced."""
+    reduction = planned.reduction
+    return None if reduction is None else [reduction.width, reduction.height]
 
-    The intent is written down before the first file is copied. If anything fails, what this
-    run created is removed again and nothing is applied; if the process dies, `rollback`
-    does the same on the next start.
+
+def _unchanged(item: dict, planned: PlannedFile) -> bool:
+    """Whether the recorded file is what the plan wants now (it is on disk as written).
+
+    A record from before signatures existed is checked by content once, and the signature
+    added, so that the next apply is quick again.
+    """
+    if "source" not in item:
+        try:
+            if _output_sha256(planned) != item.get("sha256"):
+                return False
+        except OSError:
+            return False
+        item.update(source=planned.signature(), reduced=_reduced(planned))
+        return True
+    if item.get("source") != planned.signature():
+        return False
+    filled = planned.content is not None  # generated at apply: compare the result
+    if filled and hashlib.sha256(planned.content).hexdigest() != item.get("sha256"):
+        return False
+    return item.get("reduced") == _reduced(planned)
+
+
+def apply(
+    plan: Plan,
+    user_dir: Path,
+    deployed_file: Path,
+    progress: Progress | None = None,
+) -> ApplyResult:
+    """Bring the game to `plan`, touching only what differs from the last apply.
+
+    Files applied before and still wanted unchanged are left alone; files no longer wanted,
+    or wanted differently, are removed (unless changed by hand since); new ones are written.
+    All or nothing: the intent is written down first. If anything fails, everything of ours
+    is removed and nothing is applied; if the process dies, `rollback` does the same on the
+    next start. A file dao-modman did not write is never overwritten.
     """
     if not user_dir.is_dir():
         raise DeployError(f"game user dir not found: {user_dir}")
-    unapply(deployed_file, progress)
+    rollback(deployed_file)
+    previous = load_record(deployed_file) or {}
+    if previous and Path(previous["user_dir"]) != user_dir:
+        unapply(deployed_file, progress)  # another game dir: start from nothing
+        previous = {}
+    old = {item["path"].casefold(): item for item in previous.get("files", [])}
 
     result = ApplyResult()
     resolver = _Resolver(user_dir)
+    kept: dict[Path, dict] = {}  # ours, still wanted as it is
+    removals: dict[Path, dict] = {}  # ours, to go
     writes: dict[Path, PlannedFile] = {}
-    for planned in plan.files:
+    for index, planned in enumerate(plan.files):
         dest = resolver.resolve(planned.target)
-        if dest in writes or dest.exists() or dest.is_symlink():
+        key = dest.relative_to(user_dir).as_posix().casefold()
+        item = old.pop(key, None)
+        if dest in writes or dest in kept:
+            result.skipped.append(planned.target)
+        elif item is not None:
+            state = _on_disk(item, dest)
+            if state == "modified":
+                result.kept.append(item["path"])
+            elif state == "same" and _unchanged(item, planned):
+                if "size" not in item:  # recorded before sizes were
+                    item.update(_stat(dest))
+                kept[dest] = item
+            else:
+                if state == "same":
+                    removals[dest] = item
+                writes[dest] = planned
+        elif dest.exists() or dest.is_symlink():
             result.skipped.append(planned.target)
         else:
             writes[dest] = planned
+        if progress:
+            progress("Comparing with the last apply", index + 1, len(plan.files))
+    for item in old.values():  # no longer wanted
+        dest = user_dir / normalize_rel(item["path"])
+        state = _on_disk(item, dest)
+        if state == "same":
+            removals[dest] = item
+        elif state == "modified":
+            result.kept.append(item["path"])
+
     addins_xml = resolve_case(user_dir, addins.ADDINS_REL)
+    wanted = {addin.uid.casefold() for addin in plan.addins}
+    ours = [uid for uid in previous.get("addins", []) if uid.casefold() in wanted]
+    gone = [uid for uid in previous.get("addins", []) if uid.casefold() not in wanted]
     try:
         new_addins = addins.absent(addins_xml, plan.addins)
     except (ET.ParseError, OSError, ValueError) as exc:
         raise DeployError(f"cannot read {addins_xml}: {exc}") from exc
+    ours += [uid for uid in new_addins if uid.casefold() not in {u.casefold() for u in ours}]
 
-    files = [
-        {"path": dest.relative_to(user_dir).as_posix(), "mod": planned.mod_id}
-        for dest, planned in writes.items()
-    ]
+    rel = {dest: dest.relative_to(user_dir).as_posix() for dest in [*kept, *writes]}
+    new_files = {dest: {"path": rel[dest], "mod": planned.mod_id, "new": True}
+                 for dest, planned in writes.items()}  # fmt: skip
+    created = _missing_dirs(user_dir, [*writes, addins_xml] if new_addins else list(writes))
     record: dict = {
         "state": APPLYING,
         "user_dir": str(user_dir),
-        "files": files,
-        "dirs": _missing_dirs(user_dir, [*writes, addins_xml] if new_addins else list(writes)),
-        "addins": new_addins,
+        "files": [*kept.values(), *removals.values(), *new_files.values()],
+        "dirs": [*previous.get("dirs", []), *created],
+        "addins": ours,
     }
     _save_record(deployed_file, record)
     try:
+        for dest in removals:
+            dest.unlink()
+        result.removed = len(removals)
+        if gone:
+            result.unregistered = addins.unregister(addins_xml, gone)
         for index, (dest, planned) in enumerate(writes.items()):
             dest.parent.mkdir(parents=True, exist_ok=True)
-            files[index]["sha256"] = _write_hashed(planned, dest)
+            entry = new_files[dest]
+            entry["sha256"] = _write_hashed(planned, dest)
+            entry.update(_stat(dest), source=planned.signature())
+            entry["reduced"] = _reduced(planned)
+            del entry["new"]
             if progress:
                 progress("Copying files", index + 1, len(writes))
         if new_addins:
@@ -413,9 +546,75 @@ def apply(
         if isinstance(exc, Exception):
             raise DeployError(f"apply failed and was rolled back: {exc}") from exc
         raise
+    # folders we created that the removals emptied
+    dirs = record["dirs"]
+    for folder in sorted(dirs, key=lambda d: d.count("/"), reverse=True):
+        with contextlib.suppress(OSError):  # not empty
+            (user_dir / normalize_rel(folder)).rmdir()
+    record["dirs"] = [folder for folder in dirs if (user_dir / normalize_rel(folder)).is_dir()]
+    record["files"] = [*kept.values(), *new_files.values()]
     record["state"] = APPLIED
     _save_record(deployed_file, record)
-    result.written, result.addins = len(writes), new_addins
+    result.written, result.unchanged, result.addins = len(writes), len(kept), new_addins
+    return result
+
+
+# what applying would change for a mod
+NOT_APPLIED = "not applied"
+CHANGED = "changed"
+APPLIED = "applied"
+STILL_APPLIED = "still applied"  # disabled or removed, its files still in the game
+
+
+@dataclass
+class Comparison:
+    mods: dict[str, str] = field(default_factory=dict)  # mod id -> one of the states above
+    write: int = 0
+    remove: int = 0
+    unchanged: int = 0
+
+    @property
+    def pending(self) -> list[str]:
+        return [mod_id for mod_id, state in self.mods.items() if state != APPLIED]
+
+
+def compare(
+    plan: Plan, record: dict | None, foreign: list[tuple[str, Path]] | None = None
+) -> Comparison:
+    """What the next apply would change, mod by mod, from the plan and the last record.
+
+    Only signatures are compared, nothing on disk is read: files changed by hand show up when
+    applying. Files a foreign file stands in the way of are left out, as apply skips them;
+    generated item tables count as applied while their mod is.
+    """
+    recorded: dict[str, dict[str, object]] = {}
+    for item in (record or {}).get("files", []):
+        recorded.setdefault(item.get("mod", ""), {})[item["path"].casefold()] = item.get("source")
+    blocked = {rel.casefold() for rel, _path in foreign or []}
+    planned: dict[str, dict[str, str]] = {}
+    for planned_file in plan.files:
+        target = planned_file.target.casefold()
+        if target not in blocked:
+            planned.setdefault(planned_file.mod_id, {})[target] = planned_file.signature()
+    result = Comparison()
+    for mod_id in planned.keys() | recorded.keys():
+        want, have = planned.get(mod_id, {}), recorded.get(mod_id, {})
+        # a file recorded before signatures existed counts as applied; apply checks it
+        same = sum(
+            target in have and have[target] in (signature, None)
+            for target, signature in want.items()
+        )
+        result.unchanged += same
+        result.write += len(want) - same
+        result.remove += sum(target not in want for target in have)
+        if mod_id == MERGED:
+            continue  # merged files belong to all their mods: not a mod's state
+        if not want:
+            result.mods[mod_id] = STILL_APPLIED
+        elif not have:
+            result.mods[mod_id] = NOT_APPLIED
+        else:
+            result.mods[mod_id] = APPLIED if same == len(want) == len(have) else CHANGED
     return result
 
 
