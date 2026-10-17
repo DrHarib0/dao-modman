@@ -119,3 +119,17 @@ ModalScreen {
     margin-top: 1;
     color: $text-muted;
 }
+
+#splash-art {
+    width: 100%;
+    content-align: center top;
+    color: $accent;
+    text-style: bold;
+}
+
+#splash-tagline {
+    width: 100%;
+    content-align: center top;
+    color: $text-muted;
+    margin-bottom: 1;
+}

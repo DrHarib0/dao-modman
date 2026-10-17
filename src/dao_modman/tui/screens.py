@@ -80,15 +80,31 @@ class UnapplyScreen(ModalScreen[str | None]):
         self.dismiss(value)
 
 
+SPLASH_ART = """\
+██████╗  █████╗  ██████╗
+██╔══██╗██╔══██╗██╔═══██╗
+██║  ██║███████║██║   ██║
+██║  ██║██╔══██║██║   ██║
+██████╔╝██║  ██║╚██████╔╝
+╚═════╝ ╚═╝  ╚═╝ ╚═════╝"""
+SPLASH_TAGLINE = """\
+─────────── ◆ ───────────
+     m o d   m a n a g e r"""
+
+
 class ProgressScreen(ModalScreen[None]):
     """Shown while a long operation runs. It has no keys: the operation cannot be left."""
 
-    def __init__(self, title: str) -> None:
+    def __init__(self, title: str, *, splash: bool = False) -> None:
         super().__init__()
         self.title_text = title
+        self.splash = splash  # the program's banner above, for the startup
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
+            if self.splash:
+                yield Static(SPLASH_ART, id="splash-art", markup=False)
+                yield Static(SPLASH_TAGLINE, id="splash-tagline", markup=False)
             yield Label(self.title_text, classes="title", markup=False)
             yield ProgressBar(id="work-progress")
             yield Static("", id="work-detail", markup=False)

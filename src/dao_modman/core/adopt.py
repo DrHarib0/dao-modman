@@ -80,9 +80,16 @@ class Result:
 
 
 def find(
-    library: Library, user_dir: Path, deployed_file: Path, install_dir: Path | None = None
+    library: Library,
+    user_dir: Path,
+    deployed_file: Path,
+    install_dir: Path | None = None,
+    entries: list[tuple[str, Path]] | None = None,
 ) -> Found:
-    """The files in the mod directories that dao-modman does not manage, as groups."""
+    """The files in the mod directories that dao-modman does not manage, as groups.
+
+    `entries` is the result of `deploy.unmanaged` if it is at hand already.
+    """
     external = {
         addin.uid.casefold(): addin
         for addin in addins.list_registered(user_dir)
@@ -91,7 +98,9 @@ def find(
     found = Found()
     groups: dict[tuple[str, ...], Group] = {}
     extras: dict[tuple[str, ...], list[tuple[str, Path]]] = {}
-    for rel, path in deploy.unmanaged(user_dir, deployed_file, install_dir):
+    if entries is None:
+        entries = deploy.unmanaged(user_dir, deployed_file, install_dir)
+    for rel, path in entries:
         if path.is_symlink():
             found.links.append(rel)
             continue

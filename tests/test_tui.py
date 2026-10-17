@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import contextlib
+import threading
 import zipfile
 from dataclasses import replace
 from pathlib import Path
@@ -20,12 +22,30 @@ from dao_modman.tui.screens import (
     ItemsScreen,
     NexusAddScreen,
     PathOpsScreen,
+    ProgressScreen,
 )
 
 from .conftest import make_zip
 from .gamefiles import make_tlk, make_uti
 
 OVERRIDE = "packages/core/override"
+
+
+_run_test = ModManApp.run_test
+
+
+@contextlib.asynccontextmanager
+async def _started(app: ModManApp, *args, **kwargs):
+    """Like `run_test`, but only hands over once the startup checks are done."""
+    async with _run_test(app, *args, **kwargs) as pilot:
+        await app.started.wait()
+        await pilot.pause()
+        yield pilot
+
+
+@pytest.fixture(autouse=True)
+def wait_for_startup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(ModManApp, "run_test", _started)
 
 
 def make_app(tmp_path: Path, dirs: Dirs, user_dir: Path, **kwargs) -> ModManApp:
@@ -1480,3 +1500,31 @@ async def test_free_account_opens_download_pages(
         assert opened == [nexus.download_page(7, 22), nexus.download_page(7, 23)]
         assert any("Opened 2 download page(s)" in n.message for n in app._notifications)
     assert Library(dirs).mods == {}  # nothing downloaded directly
+
+
+async def test_startup_shows_progress_and_blocks_keys(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    Library(dirs).import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a"}))
+    gate = threading.Event()
+    scan = deploy.unmanaged
+
+    def slow_scan(*args, **kwargs):
+        gate.wait(5)  # the game directories take their time
+        return scan(*args, **kwargs)
+
+    monkeypatch.setattr(deploy, "unmanaged", slow_scan)
+    app = make_app(tmp_path, dirs, user_dir)
+    async with _run_test(app, size=(140, 40)) as pilot:
+        await until(pilot, lambda: isinstance(app.screen, ProgressScreen))
+        assert app.screen.title_text == "Starting dao-modman"
+        assert "██████╗" in str(app.screen.query_one("#splash-art", Static).render())
+        detail = app.screen.query_one("#work-detail", Static)
+        await until(pilot, lambda: "Checking the game directories" in str(detail.render()))
+        assert not app.started.is_set() and rows(app) == []
+        await pilot.press("space")  # keys do nothing while starting
+        gate.set()
+        await app.started.wait()
+        await pilot.pause()
+        assert not isinstance(app.screen, ProgressScreen)
+        assert [(row[1], row[2]) for row in rows(app)] == [("✓", "one")]  # not toggled

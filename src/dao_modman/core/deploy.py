@@ -205,7 +205,11 @@ def _identical(items: list[PlannedFile]) -> bool:
     return len(digests) == 1
 
 
-def build_plan(library: Library, foreign: list[tuple[str, Path]] | None = None) -> Plan:
+def build_plan(
+    library: Library,
+    foreign: list[tuple[str, Path]] | None = None,
+    progress: Progress | None = None,
+) -> Plan:
     """What applying would deploy, and which files clash.
 
     `foreign` are the files in the mod directories that dao-modman does not manage (see
@@ -216,9 +220,10 @@ def build_plan(library: Library, foreign: list[tuple[str, Path]] | None = None) 
     plan = Plan()
     candidates: dict[tuple[str, ...], list[PlannedFile]] = {}
     chargens: dict[str, list[PlannedFile]] = {}
-    for entry, mod in library.ordered():
-        if not entry.enabled:
-            continue
+    enabled = [(entry, mod) for entry, mod in library.ordered() if entry.enabled]
+    for index, (_entry, mod) in enumerate(enabled):
+        if progress:
+            progress("Building the plan", index + 1, len(enabled))
         files_dir = library.files_dir(mod.id)
         targets = library.targets(mod, plan.warnings)
         for target, source in targets.items():

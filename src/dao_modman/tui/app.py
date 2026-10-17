@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TypeVar
 
@@ -69,6 +69,18 @@ ENABLED = "✓"
 T = TypeVar("T")
 
 COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", "Ops", "Notes")
+
+
+@dataclass
+class _Startup:
+    """What the startup checks found."""
+
+    plan: deploy.Plan | None = None
+    states: dict[str, str] = field(default_factory=dict)  # mod id -> applied state
+    foreign: list[tuple[str, Path]] = field(default_factory=list)
+    adoptable: int = 0
+    rolled_back: bool = False
+    errors: list[str] = field(default_factory=list)
 
 
 class DownloadRow(Horizontal):
@@ -192,7 +204,7 @@ class ModManApp(App[None]):
     ) -> None:
         super().__init__()
         self.config = config
-        self.library = Library(config.dirs, config.ignore)
+        self.library = Library(config.dirs, config.ignore, load=False)  # loaded by startup
         self.game_data = moditems.GameData()  # read on demand, kept for the session
         self.nexus = (
             NexusClient(config.nexus_token, transport=transport) if config.nexus_token else None
@@ -208,6 +220,7 @@ class ModManApp(App[None]):
         self._links = links or []  # nxm:// links to download right after start
         self._lock: ipc.InstanceLock | None = None
         self._server: asyncio.Server | None = None
+        self.started = asyncio.Event()  # set once the startup checks are done
 
     # -- layout -----------------------------------------------------------
 
@@ -224,28 +237,75 @@ class ModManApp(App[None]):
         self.query_one("#downloads").display = False
         self.query_one("#filter").display = False
         self.query_one("#mods").focus()
-        self.refresh_table()
-        for error in self.library.errors:
+        self._busy = True  # no keys until the library is loaded
+        self.startup()
+
+    @work(exclusive=True, group="startup")
+    async def startup(self) -> None:
+        """Load and check everything behind a progress dialog, then fill the mod list."""
+        result = await self.run_with_progress(
+            "Starting dao-modman", self._startup_checks, splash=True
+        )
+        self.foreign = result.foreign
+        self.refresh_table(plan=result.plan, states=result.states)
+        for error in [*self.library.errors, *result.errors]:
             self.notify(error, severity="error", timeout=15, markup=False)
-        try:
-            if deploy.rollback(self.config.dirs.deployed_file):
-                self.notify(
-                    "The last apply did not finish and has been rolled back: nothing is applied",
-                    severity="warning",
-                    timeout=15,
-                )
-        except (deploy.DeployError, OSError, ValueError) as exc:
-            self.error(exc)
-        self.refresh_foreign()  # after the rollback: an unfinished apply's files are not foreign
-        if self.foreign:
-            self.refresh_table()
-            self.notify_adoptable()
+        if result.rolled_back:
+            self.notify(
+                "The last apply did not finish and has been rolled back: nothing is applied",
+                severity="warning",
+                timeout=15,
+            )
+        if result.adoptable:
+            self.notify(
+                f"{result.adoptable} file(s) in the mod directories are not managed by"
+                " dao-modman: t \u2192 Adopt takes them over",
+                timeout=10,
+                markup=False,
+            )
+        self.started.set()
         if self.nexus:
             self.load_account()
         await self.listen()
         for url in self._links:
             if error := self.receive_link(url):
                 self.error(error)
+
+    def _startup_checks(self, progress: deploy.Progress) -> _Startup:
+        """Everything the mod list needs at start; runs in a thread. Problems are collected."""
+        result = _Startup()
+        self.library.reload(progress)
+        try:
+            result.rolled_back = deploy.rollback(self.config.dirs.deployed_file)
+        except (deploy.DeployError, OSError, ValueError) as exc:
+            result.errors.append(str(exc))
+        user_dir = self.config.game_user_dir
+        if user_dir and user_dir.is_dir():
+            # after the rollback: an unfinished apply's files are not foreign
+            progress("Checking the game directories", 0, 1)
+            try:
+                result.foreign = deploy.unmanaged(
+                    user_dir, self.config.dirs.deployed_file, self.config.game_install_dir
+                )
+                result.adoptable = adopt.find(
+                    self.library,
+                    user_dir,
+                    self.config.dirs.deployed_file,
+                    self.config.game_install_dir,
+                    entries=result.foreign,
+                ).file_count
+            except (deploy.DeployError, addins.AddInsError, OSError) as exc:
+                result.errors.append(str(exc))
+            progress("Checking the game directories", 1, 1)
+        try:
+            result.plan = deploy.build_plan(self.library, result.foreign, progress)
+            if record := self._record():
+                progress("Comparing with the last apply", 0, 1)
+                result.states = deploy.compare(result.plan, record, result.foreign).mods
+                progress("Comparing with the last apply", 1, 1)
+        except (pathops.PathOpError, OSError) as exc:
+            result.errors.append(str(exc))
+        return result
 
     async def listen(self) -> None:
         """Become the instance that the nxm:// handler forwards links to, if there is none."""
@@ -316,14 +376,23 @@ class ModManApp(App[None]):
         other = self.library.mods.get(targets[0])
         return f"overwrites {other.name if other else targets[0] + ' (missing)'}"
 
-    def refresh_table(self, select: str | None = None) -> None:
+    def refresh_table(
+        self,
+        select: str | None = None,
+        *,
+        plan: deploy.Plan | None = None,
+        states: dict[str, str] | None = None,
+    ) -> None:
+        """Rebuild the mod list; `plan` and `states` if they were worked out already."""
         table = self.query_one("#mods", DataTable)
         selected = select or (entry.id if (entry := self.current_entry()) else None)
         try:
-            plan = deploy.build_plan(self.library, self.foreign)
+            if plan is None:
+                plan = deploy.build_plan(self.library, self.foreign)
             conflicting, misordered = plan.conflicting_mods(), plan.misordered_mods()
-            record = self._record()  # while nothing is applied, the status line says so
-            states = deploy.compare(plan, record, self.foreign).mods if record else {}
+            if states is None:
+                record = self._record()  # while nothing is applied, the status line says so
+                states = deploy.compare(plan, record, self.foreign).mods if record else {}
         except (pathops.PathOpError, OSError) as exc:
             conflicting, misordered, states = set(), set(), {}
             self.notify(str(exc), severity="error", markup=False)
@@ -798,21 +867,25 @@ class ModManApp(App[None]):
             return action == "clear_filter"
         return not self._busy
 
-    async def run_with_progress(self, title: str, operation: Callable[..., T], *args: object) -> T:
+    async def run_with_progress(
+        self, title: str, operation: Callable[..., T], *args: object, splash: bool = False
+    ) -> T:
         """Run a blocking operation in a thread behind a progress dialog.
 
         `operation` is called with `args` plus a progress callback as its last argument.
+        With `splash`, the dialog shows the program's banner.
         """
-        screen = ProgressScreen(title)
+        screen = ProgressScreen(title, splash=splash)
         self._busy = True
         await self.push_screen(screen)
-        last = 0.0
+        last, shown = 0.0, ""
 
         def progress(phase: str, done: int, total: int) -> None:
-            nonlocal last
+            nonlocal last, shown
             now = time.monotonic()
-            if done >= total or now - last >= 0.05:  # do not flood the UI with updates
-                last = now
+            # do not flood the UI with updates, but never skip the start or end of a phase
+            if phase != shown or done >= total or now - last >= 0.05:
+                last, shown = now, phase
                 self.call_from_thread(screen.advance, phase, done, total)
 
         try:
@@ -1018,25 +1091,6 @@ class ModManApp(App[None]):
         except (deploy.DeployError, addins.AddInsError, OSError) as exc:
             self.foreign = []
             self.error(exc)
-
-    def notify_adoptable(self) -> None:
-        """Point to adopt if it has something to take over (not just ignored files or links)."""
-        user_dir = self.config.game_user_dir
-        if not user_dir:
-            return
-        try:
-            found = adopt.find(
-                self.library, user_dir, self.config.dirs.deployed_file, self.config.game_install_dir
-            )
-        except (deploy.DeployError, addins.AddInsError, OSError):
-            return  # refresh_foreign has reported it
-        if found.file_count:
-            self.notify(
-                f"{found.file_count} file(s) in the mod directories are not managed by"
-                " dao-modman: t → Adopt takes them over",
-                timeout=10,
-                markup=False,
-            )
 
     @work(exclusive=True, group="adopt")
     async def start_adopt(self) -> None:

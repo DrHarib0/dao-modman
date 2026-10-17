@@ -6,7 +6,7 @@ import contextlib
 import re
 import shutil
 import tempfile
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -47,7 +47,10 @@ def slugify(name: str) -> str:
 
 
 class Library:
-    def __init__(self, dirs: Dirs, ignore: Iterable[str] | None = None) -> None:
+    def __init__(
+        self, dirs: Dirs, ignore: Iterable[str] | None = None, *, load: bool = True
+    ) -> None:
+        """With `load=False` the library starts empty, until `reload` is called."""
         self.dirs = dirs
         self.ignore = IgnoreRules(DEFAULT_PATTERNS if ignore is None else ignore)
         dirs.ensure()
@@ -55,15 +58,22 @@ class Library:
         self.errors: list[str] = []
         self.profile = Profile()
         self._listings: dict[str, list[str]] = {}  # mod id -> its files, see `list_files`
-        self.reload()
+        if load:
+            self.reload()
 
     # -- loading / saving -------------------------------------------------
 
-    def reload(self) -> None:
+    def reload(self, progress: Callable[[str, int, int], None] | None = None) -> None:
+        """Read every mod and the profile; `progress` is told about each mod."""
         self.mods, self.errors, self._listings = {}, [], {}
-        for mod_dir in sorted(self.dirs.mods.iterdir()):
-            if not mod_dir.is_dir() or mod_dir.name.startswith("."):
-                continue
+        mod_dirs = [
+            mod_dir
+            for mod_dir in sorted(self.dirs.mods.iterdir())
+            if mod_dir.is_dir() and not mod_dir.name.startswith(".")
+        ]
+        for index, mod_dir in enumerate(mod_dirs):
+            if progress:
+                progress("Loading the library", index + 1, len(mod_dirs))
             try:
                 mod = metadata.load_mod(mod_dir)
             except metadata.MetadataError as exc:
