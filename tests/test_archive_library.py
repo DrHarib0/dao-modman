@@ -247,3 +247,28 @@ def test_rar_falls_back_to_the_next_tool(tmp_path: Path, monkeypatch: pytest.Mon
     monkeypatch.setattr(archives.shutil, "which", lambda tool: None)
     with pytest.raises(archives.ArchiveError, match="need one of"):
         archives.extract(archive, tmp_path / "out")
+
+
+def test_list_files_skips_links(tmp_path: Path) -> None:
+    root = tmp_path / "files"
+    (root / "b/deep").mkdir(parents=True)
+    (root / "a.erf").write_text("a")
+    (root / "b/deep/c.erf").write_text("c")
+    (root / "b/Z.erf").write_text("z")
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (outside / "x.erf").write_text("x")
+    (root / "link.erf").symlink_to(root / "a.erf")
+    (root / "linked_dir").symlink_to(outside)
+    assert archives.list_files(root) == ["a.erf", "b/Z.erf", "b/deep/c.erf"]
+    assert archives.list_files(tmp_path / "missing") == []
+
+
+def test_listing_follows_the_library(tmp_path: Path, library: Library) -> None:
+    mod = library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a"}))
+    assert library.list_files(mod.id) == ["a.erf"]
+    library.replace_archive(mod, make_zip(tmp_path / "one-2.zip", {"b.erf": "b"}))
+    assert library.list_files(mod.id) == ["b.erf"]  # the new files, not the cached ones
+    library.remove(mod.id)
+    again = library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a"}))
+    assert again.id == mod.id and library.list_files(again.id) == ["a.erf"]

@@ -119,11 +119,23 @@ def extract(archive: Path, dest: Path) -> None:
 
 
 def list_files(root: Path) -> list[str]:
-    """Relative posix paths of all regular files below `root`, sorted."""
-    files = []
-    for dirpath, _dirnames, filenames in os.walk(root):
-        for name in filenames:
-            path = Path(dirpath, name)
-            if path.is_file() and not path.is_symlink():
-                files.append(path.relative_to(root).as_posix())
+    """Relative posix paths of all regular files below `root`, sorted.
+
+    Links are neither listed nor followed. Plain strings and `os.scandir` instead of `Path`
+    objects: a large mod has thousands of files, and the listing is needed often.
+    """
+    files: list[str] = []
+
+    def walk(directory: str, prefix: str) -> None:
+        try:
+            entries = list(os.scandir(directory))
+        except OSError:
+            return  # gone or unreadable: like os.walk, nothing to list
+        for entry in entries:
+            if entry.is_dir(follow_symlinks=False):
+                walk(entry.path, f"{prefix}{entry.name}/")
+            elif entry.is_file(follow_symlinks=False):
+                files.append(prefix + entry.name)
+
+    walk(os.fspath(root), "")
     return sorted(files)

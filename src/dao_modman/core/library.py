@@ -54,12 +54,13 @@ class Library:
         self.mods: dict[str, Mod] = {}
         self.errors: list[str] = []
         self.profile = Profile()
+        self._listings: dict[str, list[str]] = {}  # mod id -> its files, see `list_files`
         self.reload()
 
     # -- loading / saving -------------------------------------------------
 
     def reload(self) -> None:
-        self.mods, self.errors = {}, []
+        self.mods, self.errors, self._listings = {}, [], {}
         for mod_dir in sorted(self.dirs.mods.iterdir()):
             if not mod_dir.is_dir() or mod_dir.name.startswith("."):
                 continue
@@ -72,8 +73,8 @@ class Library:
                 self.errors.append(f"{mod_dir}: id {mod.id!r} does not match directory name")
                 continue
             # the kind depends on the ignore rules, so it is worked out afresh
-            mod.kind = pathops.kind(archives.list_files(mod_dir / FILES_DIR), self.ignore.matches)
             self.mods[mod.id] = mod
+            mod.kind = pathops.kind(self.list_files(mod.id), self.ignore.matches)
         try:
             self.profile = metadata.load_profile(self.dirs.profile_file)
         except metadata.MetadataError as exc:
@@ -106,13 +107,23 @@ class Library:
     def files_dir(self, mod_id: str) -> Path:
         return self.dirs.mods / mod_id / FILES_DIR
 
+    def list_files(self, mod_id: str) -> list[str]:
+        """The files of a mod (see `archive.list_files`); not to be changed by the caller.
+
+        A mod's files only change when the library imports, replaces or removes it, so the
+        listing is kept until then (files changed there by hand show after a restart).
+        """
+        if mod_id not in self._listings:
+            self._listings[mod_id] = archives.list_files(self.files_dir(mod_id))
+        return self._listings[mod_id]
+
     def ordered(self) -> list[tuple[ProfileEntry, Mod]]:
         return [(entry, self.mods[entry.id]) for entry in self.profile.mods]
 
     def options(self, mod: Mod, problems: list[str] | None = None) -> list[PackageOptions]:
         """The option sets of the mod's override packages (one per OverrideConfig.xml)."""
         files_dir = self.files_dir(mod.id)
-        files = archives.list_files(files_dir)
+        files = self.list_files(mod.id)
         if not any(rel.rpartition("/")[2].casefold() == overridepkg.CONFIG for rel in files):
             return []
         _dazips, packages = pathops.package_roots(files)
@@ -137,7 +148,7 @@ class Library:
         Options of override packages are resolved here, so path operations see one file per
         option and never the unused variants.
         """
-        files = archives.list_files(self.files_dir(mod.id))
+        files = self.list_files(mod.id)
         mapping = pathops.default_mapping(mod, files, self.ignore.matches)
         for package in self.options(mod, problems):
             mapping, warnings = overridepkg.apply_options(
@@ -162,7 +173,7 @@ class Library:
     def addins(self, mod: Mod, targets: dict[str, str] | None = None) -> list[AddIn]:
         """The mod's AddIns to register: those whose dazip still has files to deploy."""
         files_dir = self.files_dir(mod.id)
-        roots = dazip.roots(archives.list_files(files_dir))
+        roots = dazip.roots(self.list_files(mod.id))
         sources = (self.targets(mod) if targets is None else targets).values()
         used = {dazip.owner(roots, source) for source in sources}
         return [
@@ -256,6 +267,7 @@ class Library:
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         self.mods[mod.id] = mod
+        self._listings.pop(mod.id, None)
         self.profile.mods.append(ProfileEntry(id=mod.id))
         self.save_profile(f"import {mod.id} from {archive.name}")
         return mod
@@ -273,6 +285,7 @@ class Library:
             current = self.files_dir(mod.id)
             current.rename(stage / "old")
             files.rename(current)
+            self._listings.pop(mod.id, None)
             self.save_mod(mod, f"{mod.id}: replace archive with {archive.name}")
         except (archives.ArchiveError, dazip.DazipError) as exc:
             raise LibraryError(str(exc)) from exc
@@ -327,6 +340,7 @@ class Library:
 
     def remove(self, mod_id: str, *, delete_archive: bool = False) -> None:
         mod = self.mods.pop(mod_id)
+        self._listings.pop(mod_id, None)
         shutil.rmtree(self.dirs.mods / mod_id)
         self.profile.mods = [entry for entry in self.profile.mods if entry.id != mod_id]
         self.save_profile(f"remove {mod_id}")

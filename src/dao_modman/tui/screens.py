@@ -22,7 +22,6 @@ from textual.widgets import (
 from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
 
-from ..core import archive as archives
 from ..core import deploy, nexus, pathops, report
 from ..core.library import Library
 from ..core.models import OP_REMOVE, OP_RENAME, Mod, PathOp
@@ -343,7 +342,7 @@ class OptionsScreen(ModalScreen[None]):
 
     def rebuild(self, highlight: int = 0) -> None:
         self.keys = [key for package in self.library.options(self.mod) for key in package.keys]
-        listing = archives.list_files(self.library.files_dir(self.mod.id))
+        listing = self.library.list_files(self.mod.id)
         self.files = {rel.rpartition("/")[2].casefold() for rel in listing}
         options = self.query_one("#option-keys", OptionList)
         options.clear_options()

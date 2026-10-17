@@ -157,9 +157,9 @@ def test_path_operations_apply_after_options(tmp_path: Path, library: Library) -
 def test_missing_variant_keeps_the_original_and_warns(tmp_path: Path, library: Library) -> None:
     mod = library.import_archive(make_override(tmp_path / "Bodies.override"))
     variants = library.files_dir(mod.id) / "BioWare/Dragon Age" / BASE / "Variants"
-    library.set_option(mod, library.options(mod)[0].keys[0], "Big")
-    (variants / "(big)hf_body.msh").unlink()  # the variant the user chose
+    (variants / "(big)hf_body.msh").unlink()  # the variant the user chooses below
     (variants / "(long)ef_ears.msh").unlink()  # a default with no original file to fall back on
+    library.set_option(mod, library.options(mod)[0].keys[0], "Big")
 
     plan = deploy.build_plan(library)
     assert plan.warnings == [
