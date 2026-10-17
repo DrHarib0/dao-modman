@@ -632,7 +632,10 @@ class ModManApp(App[None]):
                 self.library.save_mod(mod, f"{mod.id}: edit path operations ({len(ops)})")
                 self.refresh_table()
 
-        self.push_screen(PathOpsScreen(mod, self.library.default_targets(mod)), done)
+        base = self.library.default_targets(mod, ignored=True)
+        ignored = {source for source in base.values() if self.library.ignore.matches(source)}
+        screen = PathOpsScreen(mod, base, files_dir=self.library.files_dir(mod.id), ignored=ignored)
+        self.push_screen(screen, done)
 
     def action_remove(self) -> None:
         mod = self.current_mod()

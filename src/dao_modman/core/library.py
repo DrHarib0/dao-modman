@@ -152,14 +152,17 @@ class Library:
             found.append(PackageOptions(root, "/".join(payload), keys))
         return found
 
-    def default_targets(self, mod: Mod, problems: list[str] | None = None) -> dict[str, str]:
+    def default_targets(
+        self, mod: Mod, problems: list[str] | None = None, *, ignored: bool = False
+    ) -> dict[str, str]:
         """Target path -> source file, before the mod's path operations.
 
         Options of override packages are resolved here, so path operations see one file per
-        option and never the unused variants.
+        option and never the unused variants. With `ignored`, ignored files are included at
+        the place they would go: for showing them, never for deploying.
         """
         files = self.list_files(mod.id)
-        mapping = pathops.default_mapping(mod, files, self.ignore.matches)
+        mapping = pathops.default_mapping(mod, files, None if ignored else self.ignore.matches)
         for package in self.options(mod, problems):
             mapping, warnings = overridepkg.apply_options(
                 mapping, package.keys, mod.options, package.root, package.folder

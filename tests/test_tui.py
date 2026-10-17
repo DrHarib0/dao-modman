@@ -8,9 +8,10 @@ from pathlib import Path
 
 import httpx2
 import pytest
+from rich.style import Style
 from textual.widgets import DataTable, Input, Label, OptionList, SelectionList, Static, Tree
 
-from dao_modman.core import deploy, nexus
+from dao_modman.core import deploy, nexus, opener
 from dao_modman.core.config import Config
 from dao_modman.core.library import Library
 from dao_modman.core.models import NexusInfo, PathOp
@@ -22,6 +23,7 @@ from dao_modman.tui.screens import (
     ItemsScreen,
     NexusAddScreen,
     PathOpsScreen,
+    PathTree,
     ProgressScreen,
 )
 
@@ -901,6 +903,7 @@ async def test_package_options_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path
             return found
 
         assert sorted(leaves(tree.root)) == [
+            "Readme.txt  \u00b7 ignored",  # shown, but not installed
             "ef_ears.msh  \u2190 (long)ef_ears.msh",
             "hf_body.msh  \u2190 (big)hf_body.msh",
             "hf_skin.dds  \u2190 (pale)HF_skin.dds",
@@ -1528,3 +1531,68 @@ async def test_startup_shows_progress_and_blocks_keys(
         await pilot.pause()
         assert not isinstance(app.screen, ProgressScreen)
         assert [(row[1], row[2]) for row in rows(app)] == [("✓", "one")]  # not toggled
+
+
+def tree_nodes(node) -> dict:
+    """Every node below `node` by its path."""
+    found = {}
+    for child in node.children:
+        found[child.data] = child
+        found.update(tree_nodes(child))
+    return found
+
+
+async def test_path_editor_shows_ignored_files_and_opens_files(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    library = Library(dirs)
+    mod = library.import_archive(
+        make_zip(
+            tmp_path / "Mod.zip",
+            {"data/a.erf": "a", "data/readme.txt": "r", "setup.exe": "MZ"},
+        )
+    )
+    opened: list[Path] = []
+    monkeypatch.setattr(opener, "open_file", opened.append)
+    files = library.files_dir(mod.id)
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("e")
+        screen = app.screen
+        tree = screen.query_one(PathTree)
+        await pilot.pause()
+        nodes = tree_nodes(tree.root)
+        readme, erf = f"{OVERRIDE}/mod/data/readme.txt", f"{OVERRIDE}/mod/data/a.erf"
+        # ignored files are shown, marked, and styled apart
+        assert str(nodes[readme].label) == "readme.txt  · ignored"
+        assert tree.ignored == {readme}
+        assert tree.render_label(nodes[erf], Style(), Style()).plain == "\U0001f4c4 a.erf"
+        folder = tree.render_label(nodes[f"{OVERRIDE}/mod/data"], Style(), Style())
+        assert folder.plain == "\U0001f4c2 data"
+
+        # o opens the file's copy in the library
+        tree.move_cursor(nodes[erf])
+        await pilot.press("o")
+        assert opened == [files / "data/a.erf"]
+        # a folder cannot be opened
+        tree.move_cursor(nodes[f"{OVERRIDE}/mod/data"])
+        await pilot.press("o")
+        await pilot.pause()
+        assert opened == [files / "data/a.erf"]
+        assert any("Select a file to open" in n.message for n in app._notifications)
+        # a program is only opened after asking
+        tree.move_cursor(nodes[f"{OVERRIDE}/mod/setup.exe"])
+        await pilot.press("o")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        await pilot.press("n")
+        await pilot.pause()
+        assert len(opened) == 1
+        await pilot.press("o", "y")
+        await pilot.pause()
+        assert opened[-1] == files / "setup.exe"
+
+        # ignored files move along with their folder
+        screen.ops = [PathOp("rename", f"{OVERRIDE}/mod/data", f"{OVERRIDE}/docs")]
+        screen.rebuild()
+        assert tree.ignored == {f"{OVERRIDE}/docs/readme.txt"}
+        await pilot.press("escape")

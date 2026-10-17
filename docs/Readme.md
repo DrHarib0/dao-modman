@@ -73,6 +73,12 @@ In the editor (`e`): `r` removes and `m` renames/moves the selected entry, `u` u
 operation. `←`/`→` fold and unfold a folder, `c` folds or unfolds everything, and `/` filters
 the tree to entries whose file or folder name contains the typed text (`esc` clears it).
 
+Ignored files (readmes, screenshots, see [Ignored files](#ignored-files)) are shown too,
+dimmed and marked "ignored", where they would go: they move along with path operations but
+are never installed. `o` opens the selected file's copy in the library with the program the
+desktop uses for it; for programs and scripts (`.exe`, `.bat`, `.sh` ...) it asks first, as
+opening them may run them.
+
 ## Items
 
 ### Item Browser

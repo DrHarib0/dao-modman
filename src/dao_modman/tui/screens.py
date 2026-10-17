@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import ClassVar
 
 from rich.markup import escape
+from rich.style import Style
+from rich.text import Text
 from textual import on, work
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -21,8 +24,9 @@ from textual.widgets import (
 )
 from textual.widgets.option_list import Option
 from textual.widgets.selection_list import Selection
+from textual.widgets.tree import TreeNode
 
-from ..core import deploy, nexus, pathops, report
+from ..core import deploy, nexus, opener, pathops, report
 from ..core.library import Library
 from ..core.models import OP_REMOVE, OP_RENAME, Mod, PathOp
 from ..core.moditems import ModItem
@@ -488,12 +492,68 @@ class NexusAddScreen(ModalScreen[tuple[int, list[int], NxmLink | None] | None]):
 
 
 class PathTree(Tree[str]):
-    """A tree that folds with the arrow keys, like a file manager."""
+    """A tree of paths that folds with the arrow keys, like a file manager.
+
+    Nodes whose data is a path get the look of Textual's DirectoryTree: folder and file
+    icons, folders bold, the extension of a file name set apart. Other nodes (the conflict
+    view's group lines) keep their plain label.
+    """
+
+    ICON_NODE = "\U0001f4c1 "
+    ICON_NODE_EXPANDED = "\U0001f4c2 "
+    ICON_FILE = "\U0001f4c4 "
+    IGNORED_MARK = "  \u00b7 ignored"
+
+    COMPONENT_CLASSES: ClassVar[set[str]] = {
+        "path-tree--folder",
+        "path-tree--file",
+        "path-tree--extension",
+        "path-tree--ignored",
+    }
+
+    DEFAULT_CSS = """
+    PathTree {
+        & > .path-tree--folder {
+            text-style: bold;
+        }
+        & > .path-tree--extension {
+            color: $accent;
+        }
+        & > .path-tree--ignored {
+            text-style: dim italic;
+        }
+    }
+    """
 
     BINDINGS = [
         Binding("left", "fold", "Collapse", show=False),
         Binding("right", "unfold", "Expand", show=False),
     ]
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self.ignored: set[str] = set()  # paths of files shown, but never deployed
+
+    def render_label(self, node: TreeNode[str], base_style: Style, style: Style) -> Text:
+        label = node._label.copy()
+        label.stylize(style)
+        if not self.is_mounted or not isinstance(node.data, str):
+            return label
+        if node.allow_expand:
+            icon = self.ICON_NODE_EXPANDED if node.is_expanded else self.ICON_NODE
+            label.stylize_before(self.get_component_rich_style("path-tree--folder", partial=True))
+        else:
+            icon = self.ICON_FILE
+            # the name only: not the source note or the ignored mark after it
+            name = label.plain.split("  ", 1)[0]
+            dot = name.rfind(".")
+            if dot > 0:
+                extension = self.get_component_rich_style("path-tree--extension", partial=True)
+                label.stylize(extension, dot, len(name))
+            if node.data in self.ignored:
+                ignored = self.get_component_rich_style("path-tree--ignored", partial=True)
+                label.stylize(ignored)
+        return Text.assemble((icon, base_style), label)
 
     def action_fold(self) -> None:
         node = self.cursor_node
@@ -622,14 +682,25 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         Binding("u", "undo", "Undo last"),
         Binding("c", "toggle_all", "Collapse/expand all"),
         Binding("slash", "filter", "Filter"),
+        Binding("o", "open", "Open the file"),
         Binding("s", "save", "Save"),
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, mod: Mod, base: dict[str, str]) -> None:
+    def __init__(
+        self,
+        mod: Mod,
+        base: dict[str, str],
+        *,
+        files_dir: Path | None = None,
+        ignored: set[str] | None = None,
+    ) -> None:
         super().__init__()
         self.mod = mod
-        self.base = base
+        self.base = base  # target -> source, ignored files included
+        self.files_dir = files_dir  # where the sources are, for opening them
+        self.ignored = ignored or set()  # sources that are never deployed
+        self.sources: dict[str, str] = {}  # target -> source as shown, path operations applied
         self.ops = list(mod.ops)
         self.filter = ""
         self.collapsed: set[str] = set()  # folders the user folded, kept across rebuilds
@@ -641,8 +712,9 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
             yield Input(placeholder="filter by part of a file or folder name", id="filter")
             yield Static("", id="ops", markup=False)
             yield Label(
-                "[b]r[/] remove   [b]m[/] rename/move   [b]u[/] undo last   [b]/[/] filter   "
-                "[b]\u2190 \u2192[/] fold   [b]c[/] fold all   [b]s[/] save   [b]esc[/] cancel",
+                "[b]r[/] remove   [b]m[/] rename/move   [b]u[/] undo last   [b]o[/] open   "
+                "[b]/[/] filter   [b]\u2190 \u2192[/] fold   [b]c[/] fold all   [b]s[/] save   "
+                "[b]esc[/] cancel",
                 classes="hint",
             )
 
@@ -677,7 +749,9 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
         tree.clear()
         tree.root.expand()
         nodes = {"": tree.root}
-        for target, source in pathops.apply_ops(self.base, self.ops).items():
+        self.sources = pathops.apply_ops(self.base, self.ops)
+        tree.ignored = {t for t, source in self.sources.items() if source in self.ignored}
+        for target, source in self.sources.items():
             if self.filter and not self._matches(target):
                 continue
             parts = target.split("/")
@@ -693,6 +767,8 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
             label = parts[-1]
             if came_from.casefold() != label.casefold():
                 label += f"  \u2190 {came_from}"
+            if target in tree.ignored:
+                label += PathTree.IGNORED_MARK
             nodes[target] = nodes["/".join(parts[:-1])].add_leaf(escape(label), data=target)
         # put the cursor back on the same entry, or the closest folder that still exists
         while selected and selected not in nodes:
@@ -754,6 +830,28 @@ class PathOpsScreen(ModalScreen[list[PathOp] | None]):
                 self._add(PathOp(OP_RENAME, path, new_path))
 
         self.app.push_screen(TextPromptScreen("Rename / move to", path), done)
+
+    def action_open(self) -> None:
+        """Open the selected file's copy in the library with the desktop's program for it."""
+        source = self.sources.get(self._selected() or "")
+        if source is None or self.files_dir is None:
+            self.notify("Select a file to open")
+            return
+        path = self.files_dir / source
+
+        def go(confirmed: bool | None = True) -> None:
+            if not confirmed:
+                return
+            try:
+                opener.open_file(path)
+            except opener.OpenerError as exc:
+                self.notify(str(exc), severity="error", markup=False)
+
+        if opener.is_executable(path):
+            message = f"{path.name} is a program: opening it may run it.\n\nOpen it anyway?"
+            self.app.push_screen(ConfirmScreen(message), go)
+        else:
+            go()
 
     def action_undo(self) -> None:
         if self.ops:
