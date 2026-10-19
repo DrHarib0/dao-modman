@@ -8,14 +8,13 @@ import tomllib
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from dotenv import dotenv_values
-
 from . import ipc, paths
 from .ignore import DEFAULT_PATTERNS
 from .metadata import write_atomic
 from .paths import Dirs
 
 TOKEN_VAR = "NEXUS_API_TOKEN"
+TOKEN_FILE = ".nexus-token"  # in the config dir: the token alone
 
 
 @dataclass
@@ -25,6 +24,7 @@ class Config:
     game_install_dir: Path | None = None
     game_app_id: str | None = None  # Steam app id, for launching the game
     nexus_token: str | None = None
+    token_warning: str | None = None  # the token file is readable by other users
     terminal: str | None = None  # terminal emulator for windows opened by the nxm handler
     runtime_dir: Path | None = None  # lock and socket of the running instance; None: no IPC
     # .gitignore patterns for files inside mods that are never deployed
@@ -34,16 +34,32 @@ class Config:
     config_file: Path | None = None  # where settings changed in the app are written
 
 
-def load_token(config_dir: Path, cwd: Path | None = None) -> str | None:
-    """Environment first, then `./.env`, then `<config dir>/.env`."""
-    token = os.environ.get(TOKEN_VAR)
-    if token:
-        return token.strip()
-    for env_file in ((cwd or Path.cwd()) / ".env", config_dir / ".env"):
-        if env_file.is_file():
-            token = dotenv_values(env_file).get(TOKEN_VAR)
-            if token:
-                return token.strip()
+def load_token(config_dir: Path, *, environment: bool = True) -> str | None:
+    """The Nexus API token: from the environment, else from `<config dir>/.nexus-token`.
+
+    Never from the current directory: what is found must not depend on where dao-modman is
+    started (the nxm handler starts it wherever the browser runs).
+    """
+    if environment and (token := os.environ.get(TOKEN_VAR, "").strip()):
+        return token
+    try:
+        token = (config_dir / TOKEN_FILE).read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return token or None
+
+
+def token_warning(config_dir: Path) -> str | None:
+    """A warning if the token file can be read by other users (POSIX permissions only)."""
+    path = config_dir / TOKEN_FILE
+    if os.name == "nt":
+        return None
+    try:
+        mode = path.stat().st_mode
+    except OSError:
+        return None
+    if mode & 0o077:
+        return f"{path} can be read by other users: chmod 600 '{path}'"
     return None
 
 
@@ -89,6 +105,7 @@ def load_config() -> Config:
         game_install_dir=path_option("game_install_dir") or paths.find_game_install_dir(),
         game_app_id=str(raw.get("game_app_id") or "") or paths.find_game_app_id(),
         nexus_token=load_token(config_dir),
+        token_warning=token_warning(config_dir),
         terminal=str(raw["terminal"]) if raw.get("terminal") else None,
         runtime_dir=ipc.runtime_dir(),
         ignore=[str(p) for p in raw["ignore"]] if "ignore" in raw else list(DEFAULT_PATTERNS),

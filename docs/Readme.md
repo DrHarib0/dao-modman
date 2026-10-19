@@ -47,8 +47,9 @@ line; several downloads can run side by side. If dao-modman is not running, the 
 it in a new terminal window and starts the download there.
 
 The running instance listens on a Unix socket in `$XDG_RUNTIME_DIR`, accessible only to your
-user. The handler runs outside the project directory, so the API token must be in the
-environment or in `~/.config/dao-modman/.env`.
+user. The handler is started by the browser, which rarely sees variables set in a shell, so
+the API token is best kept in `~/.config/dao-modman/.nexus-token`; `install-nxm-handler`
+says so if it is not there.
 
 Which terminal is opened: `terminal` in `config.toml` (a command, e.g. `terminal = "kitty"`
 or `"kitty --class dao-modman"`), else `$TERMINAL`, else `xdg-terminal-exec`, else KDE's

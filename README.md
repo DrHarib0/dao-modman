@@ -50,10 +50,13 @@ Install it from PyPI with [uv](https://docs.astral.sh/uv/getting-started/install
 Then store your personal API key from nexusmods.com where dao-modman finds it:
 
     mkdir -p ~/.config/dao-modman
-    echo 'NEXUS_API_TOKEN=...' > ~/.config/dao-modman/.env
-    chmod 600 ~/.config/dao-modman/.env
+    touch ~/.config/dao-modman/.nexus-token
+    chmod 600 ~/.config/dao-modman/.nexus-token
+    # then paste the token into that file, e.g. with your editor
 
-The token is read from the environment, `./.env`, or `~/.config/dao-modman/.env`.
+The token is read from the environment variable `NEXUS_API_TOKEN`, else from
+`~/.config/dao-modman/.nexus-token` (the token alone). dao-modman warns if other users can
+read that file.
 Go to [Account Settings/API Keys](https://www.nexusmods.com/settings/api-keys) to create a token. 
 The usual security recommendations apply. If this gets more than 10 users, the author will apply for an app-specific API key.
 

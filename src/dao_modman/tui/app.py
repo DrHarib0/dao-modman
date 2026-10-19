@@ -34,7 +34,7 @@ from ..core import (
     revisions,
     textures,
 )
-from ..core.config import Config, set_option
+from ..core.config import TOKEN_FILE, TOKEN_VAR, Config, set_option
 from ..core.dazip import AddIn
 from ..core.install import install_from_nexus, link_to_nexus
 from ..core.library import Library, LibraryError
@@ -163,7 +163,7 @@ SECTIONS = ("Mod list", "Mod contents", "Nexus", "Game", "App")
 
 def token_hint() -> str:
     """Where to put the Nexus API token, with the real path of the config dir."""
-    return f"put NEXUS_API_TOKEN=... into {paths.config_dir() / '.env'}"
+    return f"put it into {paths.config_dir() / TOKEN_FILE} or set {TOKEN_VAR}"
 
 
 def key_overview() -> list[tuple[str, list[tuple[str, str]]]]:
@@ -258,6 +258,8 @@ class ModManApp(App[None]):
                 severity="warning",
                 timeout=15,
             )
+        if self.config.token_warning:
+            self.notify(self.config.token_warning, severity="warning", timeout=15, markup=False)
         if result.adoptable:
             self.notify(
                 f"{result.adoptable} file(s) in the mod directories are not managed by"

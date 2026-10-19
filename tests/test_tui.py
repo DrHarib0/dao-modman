@@ -1678,3 +1678,13 @@ async def test_path_editor_shows_ignored_files_and_opens_files(
         screen.rebuild()
         assert tree.ignored == {f"{OVERRIDE}/mod/data", erf, readme}
         await pilot.press("escape")
+
+
+async def test_startup_warns_about_a_token_file_others_can_read(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    warning = "/x/.nexus-token can be read by other users: chmod 600 '/x/.nexus-token'"
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, token_warning=warning))
+    async with app.run_test(size=(140, 40)):
+        await app.started.wait()
+        assert warning in [n.message for n in app._notifications]

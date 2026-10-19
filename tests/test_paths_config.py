@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -44,17 +45,34 @@ def test_resolve_case_reuses_existing_casing(tmp_path: Path) -> None:
 
 
 def test_token_precedence(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    cwd, config_dir = tmp_path / "cwd", tmp_path / "config"
-    cwd.mkdir()
+    config_dir = tmp_path / "config"
     config_dir.mkdir()
+    monkeypatch.chdir(tmp_path)
     monkeypatch.delenv(config.TOKEN_VAR, raising=False)
-    assert config.load_token(config_dir, cwd) is None
-    (config_dir / ".env").write_text(f"{config.TOKEN_VAR}=from-config\n")
-    assert config.load_token(config_dir, cwd) == "from-config"
-    (cwd / ".env").write_text(f"{config.TOKEN_VAR}=from-cwd\n")
-    assert config.load_token(config_dir, cwd) == "from-cwd"
-    monkeypatch.setenv(config.TOKEN_VAR, "from-env")
-    assert config.load_token(config_dir, cwd) == "from-env"
+    (tmp_path / config.TOKEN_FILE).write_text("from-cwd\n")  # never read from the cwd
+    (tmp_path / ".env").write_text(f"{config.TOKEN_VAR}=from-env-file\n")  # nor from .env
+    assert config.load_token(config_dir) is None
+
+    token_file = config_dir / config.TOKEN_FILE
+    token_file.write_text("  \n")
+    assert config.load_token(config_dir) is None  # empty
+    token_file.write_text("from-file\n")
+    assert config.load_token(config_dir) == "from-file"
+    monkeypatch.setenv(config.TOKEN_VAR, " from-env ")
+    assert config.load_token(config_dir) == "from-env"
+    assert config.load_token(config_dir, environment=False) == "from-file"
+
+
+@pytest.mark.skipif(os.name == "nt", reason="POSIX permissions")
+def test_token_file_readable_by_others_is_reported(tmp_path: Path) -> None:
+    token_file = tmp_path / config.TOKEN_FILE
+    assert config.token_warning(tmp_path) is None  # no file
+    token_file.write_text("secret")
+    token_file.chmod(0o644)
+    warning = config.token_warning(tmp_path)
+    assert warning is not None and "chmod 600" in warning and "secret" not in warning
+    token_file.chmod(0o600)
+    assert config.token_warning(tmp_path) is None
 
 
 def test_load_config_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

@@ -24,7 +24,6 @@ dependencies = [
     "textual>=1.0",
     "httpx2>=2.13",
     "tomli-w>=1.0",
-    "python-dotenv>=1.0",
     "py7zr>=0.21",
     "pathspec>=0.12",
 ]

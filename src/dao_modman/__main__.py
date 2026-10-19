@@ -10,7 +10,7 @@ import sys
 from pathlib import Path
 
 from .core import console, deploy, ipc, laa, nexus, paths, report, revisions, terminal
-from .core.config import TOKEN_VAR, Config, load_config, load_token
+from .core.config import TOKEN_FILE, TOKEN_VAR, Config, load_config, load_token, token_warning
 from .core.library import Library
 from .core.nexus import NexusError
 
@@ -74,13 +74,15 @@ def cmd_install_nxm_handler() -> int:
     command = ["xdg-mime", "default", DESKTOP_FILE, "x-scheme-handler/nxm"]
     subprocess.run(command, check=True, env=env)
     print("registered as handler for nxm:// links")
-    # The browser starts the handler outside the project dir, where ./.env is not found.
+    # The browser starts the handler: it rarely sees the variables set in a shell.
     config_dir = paths.config_dir()
-    if not os.environ.get(TOKEN_VAR) and not load_token(config_dir, cwd=config_dir):
+    if not load_token(config_dir, environment=False):
         print(
-            f"note: the handler will not find your API token: put {TOKEN_VAR}=... "
-            f"into {config_dir / '.env'}"
+            f"note: the handler may not find your API token: put it into "
+            f"{config_dir / TOKEN_FILE} (or set {TOKEN_VAR} for your desktop session)"
         )
+    if warning := token_warning(config_dir):
+        print(f"warning: {warning}")
     return 0
 
 

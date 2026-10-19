@@ -166,10 +166,15 @@ def test_install_nxm_handler_warns_about_unreachable_token(
     assert "Terminal=false" in entry  # the handler opens a terminal itself when needed
     assert entry.count("-m dao_modman nxm %u") == 1
     assert calls == [["xdg-mime", "default", "dao-modman-nxm.desktop", "x-scheme-handler/nxm"]]
-    assert "will not find your API token" in capsys.readouterr().out
+    assert "may not find your API token" in capsys.readouterr().out
+    monkeypatch.setenv("NEXUS_API_TOKEN", "abc")  # set in this shell: the browser lacks it
+    assert cli.main(["install-nxm-handler"]) == 0
+    assert "may not find your API token" in capsys.readouterr().out
 
     config_dir = tmp_path / "config/dao-modman"
     config_dir.mkdir(parents=True)
-    (config_dir / ".env").write_text("NEXUS_API_TOKEN=abc\n")
+    (config_dir / ".nexus-token").write_text("abc\n")
+    (config_dir / ".nexus-token").chmod(0o644)
     assert cli.main(["install-nxm-handler"]) == 0
-    assert "will not find" not in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "may not find" not in out and "can be read by other users" in out
