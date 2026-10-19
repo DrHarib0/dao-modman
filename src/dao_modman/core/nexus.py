@@ -8,6 +8,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
@@ -18,7 +19,17 @@ from .models import NexusInfo
 API_BASE = "https://api.nexusmods.com/v1"
 GAME = "dragonage"
 APP_NAME = "dao-modman"
-APP_VERSION = "0.1.0"
+
+
+def _app_version() -> str:
+    """The installed version, as the release tag set it (hatch-vcs): sent to Nexus."""
+    try:
+        return version(APP_NAME)
+    except PackageNotFoundError:  # running from a source tree that is not installed
+        return "0+unknown"
+
+
+APP_VERSION = _app_version()
 
 _MOD_URL = re.compile(r"nexusmods\.com/(?P<game>[^/?#]+)/mods/(?P<mod_id>\d+)")
 

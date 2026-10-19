@@ -248,3 +248,16 @@ def test_download_page() -> None:
     assert nexus.download_page(5616, 1000008673) == (
         "https://www.nexusmods.com/dragonage/mods/5616?tab=files&file_id=1000008673&nmm=1"
     )
+
+
+async def test_requests_name_the_installed_version() -> None:
+    from importlib.metadata import version
+
+    seen: list[httpx2.Request] = []
+    client = make_client(seen=seen)
+    await client.validate()
+    await client.aclose()
+    headers = seen[0].headers
+    assert headers["Application-Name"] == "dao-modman"
+    assert headers["Application-Version"] == version("dao-modman")  # not a hand-kept constant
+    assert headers["User-Agent"] == f"dao-modman/{version('dao-modman')}"
