@@ -69,7 +69,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           uvx "$GIT_CLIFF" --latest --strip header > notes.md
-          gh release create "$TAG" --title "$TAG" --notes-file notes.md --verify-tag
+          gh release create "$TAG" --title "${TAG#v}" --notes-file notes.md --verify-tag
 
   build:
     needs: release
