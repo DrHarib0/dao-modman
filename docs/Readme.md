@@ -35,6 +35,10 @@ handler; an `nxm://` link can also be pasted into the add dialog. Mod and file i
 update checks. A file that supersedes an installed one replaces it in place, so load order and
 path operations carry over. Manually imported archives are looked up on Nexus by MD5.
 
+Adding a file that is in the library already (the same Nexus file, or an archive with the
+same content) asks first: from the add dialog, from an `nxm://` link, or when importing an
+archive. Yes adds it again as another mod.
+
 ### The nxm:// handler
 
 After `dao-modman install-nxm-handler`, clicking "Mod Manager Download" in the browser hands

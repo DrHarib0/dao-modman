@@ -218,6 +218,8 @@ class ModManApp(App[None]):
         self._busy = False  # a long operation is running behind a progress dialog
         self._addins_error_shown = False
         self._links = links or []  # nxm:// links to download right after start
+        # (mod id, file id) already in the library, to be added again when its link arrives
+        self._again: set[tuple[int, int]] = set()
         self._lock: ipc.InstanceLock | None = None
         self._server: asyncio.Server | None = None
         self.started = asyncio.Event()  # set once the startup checks are done
@@ -669,9 +671,21 @@ class ModManApp(App[None]):
 
         self.push_screen(TextPromptScreen("Import archive", placeholder="/path/to/mod.zip"), done)
 
+    @staticmethod
+    def _again_question(mods: list[Mod]) -> str:
+        """Asks whether to add mods that are already in the library once more."""
+        names = "\n".join(f"{mod.name} {mod.version}".rstrip() for mod in mods)
+        if len(mods) == 1:
+            return f"{names}\nis already in the library.\n\nAdd it again as another mod?"
+        return f"{names}\nare already in the library.\n\nAdd them again as other mods?"
+
     @work
     async def import_file(self, path: Path) -> None:
         try:
+            existing = await asyncio.to_thread(self.library.find_archive, path)
+            question = existing and ConfirmScreen(self._again_question([existing]))
+            if question and not await self.push_screen_wait(question):
+                return
             mod = await asyncio.to_thread(self.library.import_archive, path)
         except (LibraryError, OSError) as exc:
             self.error(exc)
@@ -708,21 +722,36 @@ class ModManApp(App[None]):
 
         premium = bool(self.account and self.account.get("is_premium"))
 
-        def done(choice: tuple[int, list[int], NxmLink | None] | None) -> None:
-            if not choice:
-                return
-            mod_id, file_ids, link = choice
+        def go(mod_id: int, file_ids: list[int], link: NxmLink | None) -> None:
             if link is not None or premium:
                 for file_id in file_ids:
                     self.install(mod_id, file_id, link)
                 return
             # free account: the website hands out the links, the nxm handler brings them back
             for file_id in file_ids:
+                if self.library.find_nexus(mod_id, file_id):
+                    self._again.add((mod_id, file_id))  # asked already: not again on arrival
                 self.open_url(download_page(mod_id, file_id))
             self.notify(
                 f'Opened {len(file_ids)} download page(s): click "Slow download" on each',
                 markup=False,
             )
+
+        def done(choice: tuple[int, list[int], NxmLink | None] | None) -> None:
+            if not choice:
+                return
+            mod_id, file_ids, link = choice
+            again = [mod for f in file_ids if (mod := self.library.find_nexus(mod_id, f))]
+            if not again:
+                go(mod_id, file_ids, link)
+                return
+
+            def answered(yes: bool | None) -> None:
+                wanted = [f for f in file_ids if yes or not self.library.find_nexus(mod_id, f)]
+                if wanted:
+                    go(mod_id, wanted, link)
+
+            self.push_screen(ConfirmScreen(self._again_question(again)), answered)
 
         installed = {
             (mod.nexus.mod_id, mod.nexus.file_id) for mod in self.library.mods.values() if mod.nexus
@@ -739,7 +768,18 @@ class ModManApp(App[None]):
             return f"that link is for {link.game!r}, not {GAME!r}"
         if not self.nexus:
             return f"no Nexus API token: {token_hint()}"
-        self.install(link.mod_id, link.file_id, link)
+        key = (link.mod_id, link.file_id)
+        existing = self.library.find_nexus(*key)
+        if existing is None or key in self._again:
+            self._again.discard(key)
+            self.install(link.mod_id, link.file_id, link)
+            return None
+
+        def answered(yes: bool | None) -> None:
+            if yes:
+                self.install(link.mod_id, link.file_id, link)
+
+        self.push_screen(ConfirmScreen(self._again_question([existing])), answered)
         return None
 
     @work

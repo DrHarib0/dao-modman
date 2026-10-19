@@ -1471,6 +1471,122 @@ async def test_free_account_opens_download_pages(
     assert Library(dirs).mods == {}  # nothing downloaded directly
 
 
+def nexus_files(dirs: Dirs) -> list[int]:
+    return sorted(mod.nexus.file_id for mod in Library(dirs).mods.values() if mod.nexus)
+
+
+async def test_adding_a_nexus_file_again_asks_first(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    Library(dirs).import_archive(
+        make_zip(tmp_path / "Main-7.zip", {"m.erf": "m"}),
+        version="1.0",
+        nexus=NexusInfo("dragonage", 7, 22),
+    )
+    app = ModManApp(
+        Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret"),
+        transport=httpx2.MockTransport(multi_file_handler(tmp_path, premium=True)),
+    )
+    async with app.run_test(size=(140, 40)) as pilot:
+        files = await look_up_mod_7(app, pilot)
+        assert files.selected == []  # the main file is installed: not preselected
+        await pilot.press("space", "down", "space", "enter")  # it and the optional file
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        assert app.screen.message.startswith("Main-7 1.0\nis already in the library.")
+        await pilot.press("n")  # only the optional file is installed
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert nexus_files(dirs) == [22, 23]
+
+        files = await look_up_mod_7(app, pilot)
+        await pilot.press("space", "enter", "y")
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+    assert nexus_files(dirs) == [22, 22, 23]
+
+
+async def test_link_for_a_file_in_the_library_asks_once(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    Library(dirs).import_archive(
+        make_zip(tmp_path / "Main-7.zip", {"m.erf": "m"}), nexus=NexusInfo("dragonage", 7, 22)
+    )
+    app = ModManApp(
+        Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret"),
+        transport=httpx2.MockTransport(multi_file_handler(tmp_path, premium=False)),
+    )
+    app.open_url = lambda url, **_: None
+    link = "nxm://dragonage/mods/7/files/22?key=k&expires=99"
+    async with app.run_test(size=(140, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        assert app.receive_link(link) is None
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.press("n")
+        await app.workers.wait_for_complete()
+        assert nexus_files(dirs) == [22]
+
+        # confirmed in the add dialog: the link that comes back from the browser just installs
+        await look_up_mod_7(app, pilot)
+        await pilot.press("enter", "y")
+        await pilot.pause()
+        app.receive_link(link)
+        await pilot.pause()
+        assert not isinstance(app.screen, ConfirmScreen)
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+        assert nexus_files(dirs) == [22, 22]
+
+        app.receive_link(link)  # asked again next time
+        await pilot.pause()
+        assert isinstance(app.screen, ConfirmScreen)
+        await pilot.press("n")
+
+
+@pytest.mark.parametrize("excluded", [False, True])
+async def test_importing_an_archive_again_asks_first(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, excluded: bool
+) -> None:
+    archive = make_zip(tmp_path / "mod.zip", {"a.erf": "a", "b.erf": "b", "docs/c.gda": "c"})
+    other = make_zip(tmp_path / "other.zip", {"b.erf": "b"})
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        for path in (archive, other):  # new archives: no question
+            app.import_file(path)
+            await app.workers.wait_for_complete()
+        assert len(app.library.mods) == 2
+        if excluded:
+            first = app.library.mods["mod"]
+            first.ops = [PathOp("exclude", f"{OVERRIDE}/mod/b.erf")]
+            app.library.save_mod(first)
+            targets = [f.target for f in deploy.build_plan(app.library).files]
+            assert f"{OVERRIDE}/mod/b.erf" not in targets and f"{OVERRIDE}/mod/a.erf" in targets
+
+        app.import_file(archive)
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        assert app.screen.message.startswith("mod\nis already in the library.")
+        await pilot.press("n")
+        await app.workers.wait_for_complete()
+        assert len(app.library.mods) == 2
+
+        app.import_file(archive)
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        assert sorted(app.library.mods) == ["mod", "mod-2", "other"]
+
+    # the second copy wins on every file, also on one the first copy excludes: it starts
+    # without the first one's operations. Identical copies are no conflict.
+    plan = deploy.build_plan(app.library)
+    deployed = {
+        f.target.rpartition("/")[2]: f.mod_id for f in plan.files if f.mod_id.startswith("mod")
+    }
+    assert deployed == {"a.erf": "mod-2", "b.erf": "mod-2", "c.gda": "mod-2"}
+    assert plan.conflicts == [] and plan.overwrites() == {}
+    assert app.library.mods["mod-2"].ops == []
+
+
 async def test_startup_shows_progress_and_blocks_keys(
     tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

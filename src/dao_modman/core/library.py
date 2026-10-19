@@ -225,6 +225,28 @@ class Library:
                 unpacked.rename(files / nested)
         return files
 
+    def find_nexus(self, mod_id: int, file_id: int) -> Mod | None:
+        """The mod installed from this Nexus file, if any."""
+        return next(
+            (
+                mod
+                for mod in self.mods.values()
+                if mod.nexus and (mod.nexus.mod_id, mod.nexus.file_id) == (mod_id, file_id)
+            ),
+            None,
+        )
+
+    def find_archive(self, archive: Path) -> Mod | None:
+        """The mod imported from an archive with the same content, if any."""
+        archive = archive.expanduser()
+        if not archive.is_file():
+            return None  # importing it reports the problem
+        sha256 = archives.sha256_file(archive)
+        return next(
+            (mod for mod in self.mods.values() if mod.archive and mod.archive.sha256 == sha256),
+            None,
+        )
+
     def _store(self, archive: Path) -> Path:
         """Make sure the archive lives in `downloads/`; returns its path there."""
         archive = archive.expanduser().resolve()
