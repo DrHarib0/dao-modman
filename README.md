@@ -58,7 +58,11 @@ The token is read from the environment variable `NEXUS_API_TOKEN`, else from
 `~/.config/dao-modman/.nexus-token` (the token alone). dao-modman warns if other users can
 read that file.
 Go to [Account Settings/API Keys](https://www.nexusmods.com/settings/api-keys) to create a token. 
-The usual security recommendations apply. If this gets more than 10 users, the author will apply for an app-specific API key.
+Use your own key and never share it.
+
+dao-modman is in beta testing. Nexus Mods allows personal API keys for apps in testing; before
+a public announcement, dao-modman will be registered with Nexus Mods and switch to logging in
+with your Nexus account (SSO), so you no longer need to create a key.
 
 ## Run
 
