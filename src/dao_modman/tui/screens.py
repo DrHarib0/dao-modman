@@ -466,7 +466,7 @@ class NexusAddScreen(ModalScreen[tuple[int, list[int], NxmLink | None] | None]):
         files = [
             f for f in listing.get("files", []) if f.get("category_name") not in HIDDEN_CATEGORIES
         ]
-        files.sort(key=lambda f: f.get("uploaded_timestamp") or 0, reverse=True)
+        files.sort(key=lambda f: f.get("uploaded_timestamp", 0), reverse=True)
         self.mod_id = mod_id
         hint = "" if self.premium else " - selected files open in the browser (free account)"
         info.update(f"{mod_info.get('name', mod_id)}: {len(files)} file(s){hint}")

@@ -6,46 +6,68 @@ on Steam/Proton (Linux), heavily inspired by [MO2](https://www.modorganizer.org/
 
 ![Screenshot of the TUI](https://raw.githubusercontent.com/DrHarib0/dao-modman/main/docs/img/ui-screenshot-1.png)
 
-## A tribute to a masterpiece
-
-DA:O is, in the author's opinion, one of the greatest RPGs ever made. It was released in 2009, more than 15 years ago, and 
-is still the best entry of its series. While the writing has aged perfectly, the graphics have not, and the mechanics
-only in part. Combat is still fun, especially at higher difficulty levels.
-
 ## Motivation
 
-The computer you are running this on is probably very different from the one you used when this game came out. If you
-have moved on from Windows to Linux since then like the author did, the goal of this project is to be the only tool you need.
+DA:O is, in the author's opinion, one of the greatest RPGs ever made. It was released in 2009, and is still the best
+entry of its series. That is true even if you play the vanilla version, which came with, well, a few bugs.
+
+The computer you are using now is probably very different from the one you used when this game came out. Thankfully, the
+modding community for this game is simply amazing.  
+Counting total number of mods, DA:O is still in the top 25 as of 2026. 
+
+This program will be the only one to need to use what other fans have made,
+and experience the game as it was meant to be - or however you want it to be. 
+
+This is an old game. It was limited to 2GB of RAM, and windows only. It had so many bugs. Over the years, many tools
+and mods have addressed those issues. Most of them were targeted for windows and needed specialized tools.
++ you need a alot of mods
++ file structure/overriding
++ special tools. addins, overrides, custom formats like .overridde
+
+## This tool does it all 
+
++ the author did not want to run a bunch of tools through wine
++ everything in one place. clean override directory at any time
 
 ## Features
+- Mod Ordering: no more prefixes for mod directories - load order is defined in the manager
+- `dazip` installation: No need to run `daoupdater` or other tools via wine
+- Mixed mods with both `addins` and `override` files: these often need manual steps with the Windows-based mod managers.
+- Configurable mods: supports the `.override` format introduced by [DAO-Modmanager](https://www.nexusmods.com/dragonage/mods/277)
+- `chargenmorphcfg.xml` merging: runs automatically if you add/remove a mod containing character morphs
 - Nexus Integration: Download mods from [nexusmods](https://www.nexusmods.com/games/dragonage)
 - Archive formats: `.dazip`, `.override`, `.zip`, `.7z` and `.rar`, also nested
 - Conflict Detection: see which mod overwrites which, and decide by load order or by leaving single files out
-- Adopt: take over a game that was modded by hand or with another tool
-- Mod Ordering: no more prefixes for mod directories - load order is defined in the manager
-- Mix and Match: pick which files of a mod you want, in the UI; the directory structure is taken care of. This selection persists if you disable a mod and reenable it later
+- Mix and Match: pick which files of a mod you want, in the UI; the directory structure is taken care of. 
+  This selection persists if you disable a mod and reenable it later.
 - Setup: to get the game running smoothly, `dao-modman` handles the technical stuff:
   - LAA Patch so the game can use 4GB of RAM instead of its intended 2GB
   - enabling the developer console
   - scaling down (modded) textures on heavily modded games to fit into the 4GB limit
-- `dazip` installation: No need to run `daoupdater` or other tools via wine
-- `chargenmorphcfg.xml` merging: runs automatically if you add/remove a mod containing character morphs
-- Mixed mods with both `addins` and `override` files: these often need manual steps with the Windows-based mod managers.
-  Some very popular mods have a lot of posts about this problem, like the [Winter Forge](https://www.nexusmods.com/dragonage/mods/122).
-- Configurable mods: supports the `.override` format introduced by [DAO-Modmanager](https://www.nexusmods.com/dragonage/mods/277)
 - Item Browser: list items added by a mod. Automatically writes the item DB for [Add any item visual deluxe](https://www.nexusmods.com/dragonage/mods/1825) 
   when installed, freeing you from yet another windows tool to run manually.
 
+### Install mid-playthough
++ designed to start from clean slate, but will up mods already installed
++ pre-installed .override packages cannot be reconfigured, must add manually
+
 ## Supported platforms
 
-Currently only the Steam release on Linux (Proton). Windows and the GOG/EA releases are not supported
-yet. Porting is not a big deal, but it needs testing on those setups: volunteers are welcome.
+Currently only the Steam release on Linux (Proton) has been tested. `dao-modman` will ask you for the mod/install 
+directories otherwise
+
+Windows and MacOSX are not officially supported yet. 
+Porting is not a big deal, but it needs testing : volunteers are welcome.
 
 ## Setup
 
-Install it from PyPI with [uv](https://docs.astral.sh/uv/getting-started/installation/), or with pipx:
+Install from PyPI with [uv](https://docs.astral.sh/uv/getting-started/installation/), or with pipx:
 
     uv tool install dao-modman             # or: pipx install dao-modman
+
+Alternatively clone this repo and run the application with uv:
+
+    uv run dao-modman
 
 Then store your personal API key from nexusmods.com where dao-modman finds it:
 

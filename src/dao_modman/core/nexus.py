@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
+from typing import cast
 from urllib.parse import parse_qs, urlsplit
 
 import httpx2
@@ -174,20 +175,20 @@ class NexusClient:
 
     async def validate(self) -> dict:
         """Account info for the token (`name`, `is_premium`, ...)."""
-        return await self._get("/users/validate.json")
+        return cast(dict, await self._get("/users/validate.json"))
 
     async def mod(self, mod_id: int) -> dict:
-        return await self._get(f"/games/{GAME}/mods/{mod_id}.json")
+        return cast(dict, await self._get(f"/games/{GAME}/mods/{mod_id}.json"))
 
     async def files(self, mod_id: int) -> dict:
         """`{"files": [...], "file_updates": [...]}`"""
-        return await self._get(f"/games/{GAME}/mods/{mod_id}/files.json")
+        return cast(dict, await self._get(f"/games/{GAME}/mods/{mod_id}/files.json"))
 
     async def file(self, mod_id: int, file_id: int) -> dict:
-        return await self._get(f"/games/{GAME}/mods/{mod_id}/files/{file_id}.json")
+        return cast(dict, await self._get(f"/games/{GAME}/mods/{mod_id}/files/{file_id}.json"))
 
     async def md5_search(self, md5: str) -> list:
-        return await self._get(f"/games/{GAME}/mods/md5_search/{md5}.json")
+        return cast(list, await self._get(f"/games/{GAME}/mods/md5_search/{md5}.json"))
 
     async def download_urls(self, mod_id: int, file_id: int, link: NxmLink | None = None) -> list:
         """CDN URLs for a file. Free accounts need the key/expires pair of an nxm link."""
