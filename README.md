@@ -20,9 +20,9 @@ and experience the game as it was meant to be - or however you want it to be.
 
 This is an old game. It was limited to 2GB of RAM, and windows only. It had so many bugs. Over the years, many tools
 and mods have addressed those issues. Most of them were targeted for windows and needed specialized tools.
-+ you need a alot of mods
++ you need a lot of mods
 + file structure/overriding
-+ special tools. addins, overrides, custom formats like .overridde
++ special tools. addins, overrides, custom formats like .override
 
 ## This tool does it all 
 
@@ -47,7 +47,7 @@ and mods have addressed those issues. Most of them were targeted for windows and
 - Item Browser: list items added by a mod. Automatically writes the item DB for [Add any item visual deluxe](https://www.nexusmods.com/dragonage/mods/1825) 
   when installed, freeing you from yet another windows tool to run manually.
 
-### Install mid-playthough
+### Install mid-playthrough
 + designed to start from clean slate, but will up mods already installed
 + pre-installed .override packages cannot be reconfigured, must add manually
 
@@ -57,7 +57,7 @@ Currently only the Steam release on Linux (Proton) has been tested. `dao-modman`
 directories otherwise
 
 Windows and MacOSX are not officially supported yet. 
-Porting is not a big deal, but it needs testing : volunteers are welcome.
+Porting is not a big deal, but it needs testing: volunteers are welcome.
 
 ## Setup
 
