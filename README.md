@@ -53,8 +53,10 @@ and mods have addressed those issues. Most of them were targeted for windows and
 
 ## Supported platforms
 
-Currently only the Steam release on Linux (Proton) has been tested. `dao-modman` will ask you for the mod/install 
-directories otherwise
+Currently only the Steam release on Linux (Proton) has been tested. Steam installs are found
+automatically; for other installs on Linux, e.g. with Lutris or plain Wine, set the game's
+directories and launch command in `~/.config/dao-modman/config.toml`, see
+[other installs](https://github.com/DrHarib0/dao-modman/blob/main/docs/Readme.md#other-installs-lutris-wine).
 
 Windows and MacOSX are not officially supported yet. 
 Porting is not a big deal, but it needs testing: volunteers are welcome.

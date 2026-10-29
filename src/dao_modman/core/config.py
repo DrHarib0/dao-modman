@@ -17,12 +17,17 @@ TOKEN_VAR = "NEXUS_API_TOKEN"
 TOKEN_FILE = ".nexus-token"  # in the config dir: the token alone
 
 
+class ConfigError(Exception):
+    pass
+
+
 @dataclass
 class Config:
     dirs: Dirs
     game_user_dir: Path | None = None
     game_install_dir: Path | None = None
     game_app_id: str | None = None  # Steam app id, for launching the game
+    launch_command: list[str] | None = None  # starts the game instead of Steam, e.g. Lutris
     nexus_token: str | None = None
     token_warning: str | None = None  # the token file is readable by other users
     terminal: str | None = None  # terminal emulator for windows opened by the nxm handler
@@ -91,11 +96,25 @@ def load_config() -> Config:
     config_file = config_dir / "config.toml"
     if config_file.is_file():
         with config_file.open("rb") as fh:
-            raw = tomllib.load(fh)
+            try:
+                raw = tomllib.load(fh)
+            except tomllib.TOMLDecodeError as exc:
+                raise ConfigError(f"{config_file}: {exc}") from exc
 
     def path_option(key: str) -> Path | None:
         value = raw.get(key)
         return Path(value).expanduser() if value else None
+
+    command = raw.get("launch_command")
+    if command is not None and (
+        not isinstance(command, list)
+        or not command
+        or not all(isinstance(part, str) and part for part in command)
+    ):
+        raise ConfigError(
+            f"{config_file}: launch_command must be a list of arguments, "
+            'e.g. ["lutris", "lutris:rungame/dragon-age-origins"]'
+        )
 
     data = path_option("data_dir") or paths.data_dir()
     dirs = Dirs(data=data, downloads=path_option("downloads_dir") or data / "downloads")
@@ -104,6 +123,7 @@ def load_config() -> Config:
         game_user_dir=path_option("game_user_dir") or paths.find_game_user_dir(),
         game_install_dir=path_option("game_install_dir") or paths.find_game_install_dir(),
         game_app_id=str(raw.get("game_app_id") or "") or paths.find_game_app_id(),
+        launch_command=command,
         nexus_token=load_token(config_dir),
         token_warning=token_warning(config_dir),
         terminal=str(raw["terminal"]) if raw.get("terminal") else None,

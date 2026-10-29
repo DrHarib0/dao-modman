@@ -10,7 +10,15 @@ import sys
 from pathlib import Path
 
 from .core import console, deploy, ipc, laa, nexus, paths, report, revisions, terminal
-from .core.config import TOKEN_FILE, TOKEN_VAR, Config, load_config, load_token, token_warning
+from .core.config import (
+    TOKEN_FILE,
+    TOKEN_VAR,
+    Config,
+    ConfigError,
+    load_config,
+    load_token,
+    token_warning,
+)
 from .core.library import Library
 from .core.nexus import NexusError
 
@@ -202,7 +210,14 @@ def main(argv: list[str] | None = None) -> int:
         "chargen", help="report on the merged character creator list and its broken entries"
     )
     args = parser.parse_args(argv)
+    try:
+        return _run(args)
+    except ConfigError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
+
+def _run(args: argparse.Namespace) -> int:
     if args.command == "nxm":
         return cmd_nxm(args.url)
     if args.command == "chargen":

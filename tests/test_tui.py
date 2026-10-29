@@ -608,12 +608,16 @@ async def test_launch_game(tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypat
         await pilot.press("a", "y")
         await app.workers.wait_for_complete()
         await pilot.press("l")
-        assert [n.message for n in app._notifications][-1] == "Launching the game through Steam"
+        assert [n.message for n in app._notifications][-1] == "Launching the game"
 
-        app.config.game_app_id = None
+        app.config.launch_command = ["lutris", "lutris:rungame/dragon-age-origins"]
         await pilot.press("l")
-        assert len(spawned) == 2
-        assert "game_app_id" in [n.message for n in app._notifications][-1]
+        assert spawned[-1] == ["lutris", "lutris:rungame/dragon-age-origins"]
+
+        app.config.game_app_id = app.config.launch_command = None
+        await pilot.press("l")
+        assert len(spawned) == 3
+        assert "launch_command" in [n.message for n in app._notifications][-1]
 
 
 def test_launch_command_and_app_id(tmp_path: Path, monkeypatch) -> None:

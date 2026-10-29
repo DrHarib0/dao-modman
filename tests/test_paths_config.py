@@ -98,6 +98,38 @@ def test_load_config_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     assert config.load_config().ignore == ["*.txt", "/docs/"]
 
 
+def test_launch_command_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    config_file = tmp_path / "cfg" / paths.APP_NAME / "config.toml"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("")
+    assert config.load_config().launch_command is None
+
+    config_file.write_text('launch_command = ["lutris", "lutris:rungame/dragon-age-origins"]\n')
+    assert config.load_config().launch_command == ["lutris", "lutris:rungame/dragon-age-origins"]
+
+
+@pytest.mark.parametrize(
+    "text",
+    ['launch_command = "lutris"', "launch_command = []", 'launch_command = ["a", 1]', "x = ["],
+)
+def test_bad_config_is_reported(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], text: str
+) -> None:
+    from dao_modman.__main__ import main
+
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    config_file = tmp_path / "cfg" / paths.APP_NAME / "config.toml"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text(text + "\n")
+    with pytest.raises(config.ConfigError):
+        config.load_config()
+    assert main(["conflicts"]) == 1
+    assert capsys.readouterr().err.startswith(f"error: {config_file}")
+
+
 def test_set_option_keeps_the_rest_of_the_file(tmp_path: Path) -> None:
     file = tmp_path / "new" / "config.toml"
     config.set_option(file, "max_texture_size", 2048)  # no file yet

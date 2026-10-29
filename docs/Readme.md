@@ -20,7 +20,25 @@ which on Steam/Proton is
     ~/.config/dao-modman/config.toml   # optional overrides, see below
 
 `config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `game_app_id`,
-`data_dir`, `downloads_dir`, `terminal`, `ignore`, `language`, `max_texture_size`.
+`launch_command`, `data_dir`, `downloads_dir`, `terminal`, `ignore`, `language`,
+`max_texture_size`.
+
+## Other installs (Lutris, Wine)
+
+Only Steam installs are found automatically. For any other install, tell dao-modman where the
+game is and how to start it, in `~/.config/dao-modman/config.toml`:
+
+    # inside the Wine prefix: the user's Documents/BioWare/Dragon Age folder
+    game_user_dir = "~/Games/dragon-age-origins/drive_c/users/yourname/Documents/BioWare/Dragon Age"
+    # the folder with bin_ship/DAOrigins.exe
+    game_install_dir = "~/Games/dragon-age-origins/drive_c/GOG Games/Dragon Age Origins"
+    # what `l` runs instead of Steam: the program and its arguments, as a list
+    launch_command = ["lutris", "lutris:rungame/dragon-age-origins"]
+
+The Lutris game id (`dragon-age-origins` above) is the one `lutris --list-games` shows. A
+plain Wine prefix works the same way, e.g.
+`launch_command = ["env", "WINEPREFIX=/home/yourname/Games/dao", "wine", "C:\\GOG Games\\Dragon Age Origins\\bin_ship\\DAOrigins.exe"]`.
+Only the Steam release has been tested so far.
 
 ## Nexus Mods
 

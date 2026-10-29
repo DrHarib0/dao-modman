@@ -133,7 +133,7 @@ KEYS = [
     Key("n", "add_nexus", "Nexus", "Add a mod from Nexus (URL, id or nxm:// link)", "Nexus", True),
     Key("a", "apply", "Apply", "Apply the enabled mods to the game", "Game", footer=True),
     Key("x", "unapply", "Unapply", "Remove the applied mods from the game", "Game", footer=True),
-    Key("l", "launch", "Launch", "Launch the game through Steam", "Game", footer=True),
+    Key("l", "launch", "Launch", "Launch the game", "Game", footer=True),
     Key("question_mark", "keys", "Keys", "Show this overview", "App", footer=True, display="?"),
     Key("q", "quit", "Quit", "Quit", "App", footer=True),
     Key("r", "rename", "Rename", "Rename the mod", "Mod list"),
@@ -1071,9 +1071,9 @@ class ModManApp(App[None]):
         self.push_screen(KeysScreen(key_overview()))
 
     def action_launch(self) -> None:
-        """Start the game through Steam."""
+        """Start the game: with launch_command from config.toml, or through Steam."""
         try:
-            launch.launch(self.config.game_app_id)
+            launch.launch(self.config.game_app_id, self.config.launch_command)
         except launch.LaunchError as exc:
             self.error(exc)
             return
@@ -1081,7 +1081,7 @@ class ModManApp(App[None]):
         if enabled and not self.config.dirs.deployed_file.exists():
             self.notify("Launching the game - note: your mods are not applied", severity="warning")
         else:
-            self.notify("Launching the game through Steam")
+            self.notify("Launching the game")
 
     # -- tools ------------------------------------------------------------
 
