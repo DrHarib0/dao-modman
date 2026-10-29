@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import os
+import socket
 from pathlib import Path
 
 import pytest
@@ -38,26 +41,48 @@ async def test_links_are_delivered_and_errors_reported(tmp_path: Path) -> None:
         received.append(url)
         return "not for this game" if "skyrim" in url else None
 
-    (tmp_path / ipc.SOCKET_NAME).write_text("stale")  # left over from a crashed instance
+    port_file = tmp_path / ipc.PORT_NAME
+    port_file.write_text("stale")  # left over from a crashed instance
     server = await ipc.serve(tmp_path, on_link)
-    assert (tmp_path / ipc.SOCKET_NAME).stat().st_mode & 0o777 == 0o600
+    if os.name != "nt":
+        assert port_file.stat().st_mode & 0o777 == 0o600
+    info = json.loads(port_file.read_text())
 
     await asyncio.to_thread(ipc.send_link, tmp_path, LINK)
     with pytest.raises(ipc.IpcError, match="not for this game"):
         await asyncio.to_thread(ipc.send_link, tmp_path, "nxm://skyrim/mods/1/files/2")
     assert received == [LINK, "nxm://skyrim/mods/1/files/2"]
 
-    # garbage on the socket is answered, not acted on
-    reader, writer = await asyncio.open_unix_connection(str(tmp_path / ipc.SOCKET_NAME))
-    writer.write(b'{"nxm": 5}\n')
-    assert (await reader.readline()) == b"error: malformed request\n"
-    writer.close()
+    async def raw(request: bytes) -> bytes:
+        reader, writer = await asyncio.open_connection(ipc.HOST, info["port"])
+        writer.write(request)
+        reply = await reader.readline()
+        writer.close()
+        return reply
+
+    # without the token nothing is delivered; garbage is answered, not acted on
+    assert await raw(json.dumps({"nxm": LINK}).encode() + b"\n") == b"error: not authorized\n"
+    wrong = {"token": "0" * 64, "nxm": LINK}
+    assert await raw(json.dumps(wrong).encode() + b"\n") == b"error: not authorized\n"
+    assert await raw(b"[1, 2]\n") == b"error: not authorized\n"
+    bad = {"token": info["token"], "nxm": 5}
+    assert await raw(json.dumps(bad).encode() + b"\n") == b"error: malformed request\n"
+    assert await raw(b"not json\n") == b"error: malformed request\n"
     assert len(received) == 2
 
     await ipc.stop(server, tmp_path)
-    assert not (tmp_path / ipc.SOCKET_NAME).exists()
+    assert not port_file.exists()
     with pytest.raises(ipc.IpcError, match="does not answer"):
         await asyncio.to_thread(ipc.send_link, tmp_path, LINK, 0.2)
+
+
+def test_stale_port_file_does_not_answer(tmp_path: Path) -> None:
+    with socket.socket() as sock:  # a port that nothing listens on any more
+        sock.bind((ipc.HOST, 0))
+        port = sock.getsockname()[1]
+    (tmp_path / ipc.PORT_NAME).write_text(json.dumps({"port": port, "token": "t"}))
+    with pytest.raises(ipc.IpcError, match="does not answer"):
+        ipc.send_link(tmp_path, LINK, 0.3)
 
 
 @pytest.fixture

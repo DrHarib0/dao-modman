@@ -444,7 +444,7 @@ async def test_link_from_the_handler_downloads_in_the_running_app(
         assert sorted(row[2] for row in rows(app)) == ["My Mod - One", "My Mod - Two"]
 
     assert not ipc.is_running(runtime)
-    assert not (runtime / ipc.SOCKET_NAME).exists()
+    assert not (runtime / ipc.PORT_NAME).exists()
 
 
 async def test_startup_link_and_second_instance(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:
@@ -462,7 +462,7 @@ async def test_startup_link_and_second_instance(tmp_path: Path, dirs: Dirs, user
         async with second.run_test(size=(140, 40)):
             assert second._server is None
         assert ipc.is_running(runtime)
-        assert (runtime / ipc.SOCKET_NAME).exists()
+        assert (runtime / ipc.PORT_NAME).exists()
 
 
 async def test_path_tree_folding_and_filter(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:

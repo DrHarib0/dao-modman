@@ -6,6 +6,7 @@ on:
   pull_request:
     branches: [main]
   workflow_call: # run by the release workflow before it releases
+  workflow_dispatch: # check a branch by hand: gh workflow run ci.yml --ref <branch>
 
 permissions:
   contents: read
@@ -42,3 +43,18 @@ jobs:
           enable-cache: true
       - run: uv sync --locked
       - run: uv run pytest
+
+  # Windows support is being ported part by part; this runs the parts done so far.
+  test-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0 # the version comes from the git tags
+      - name: Install uv and Python 3.14
+        uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          python-version: "3.14"
+          enable-cache: true
+      - run: uv sync --locked
+      - run: uv run pytest tests/test_ipc.py
