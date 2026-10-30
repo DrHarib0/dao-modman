@@ -25,6 +25,7 @@ dependencies = [
     "httpx2>=2.16.0",
     "tomli-w>=1.0",
     "py7zr>=0.21",
+    "brotli>=1.2.1",  # used by py7zr on downloaded archives; older versions are exploitable
     "pathspec>=0.12",
 ]
 
