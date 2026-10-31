@@ -29,8 +29,25 @@ are in `%APPDATA%\dao-modman\`; read `~/.config/dao-modman` in this document as 
 `launch_command`, `unrar_command`, `data_dir`, `downloads_dir`, `terminal`, `ignore`,
 `language`, `max_texture_size`.
 
-Windows paths go in single quotes, or use forward slashes: in double quotes TOML reads `\` as
-the start of an escape sequence, e.g. `game_user_dir = 'C:\Users\yourname\Documents\BioWare\Dragon Age'`.
+## Settings and setup wizard
+
+`s` opens the settings: every `config.toml` key with the value in effect, marked
+`(found automatically)` or `(default)` when the file does not set it, plus the Nexus API key,
+the nxm:// handler and the setup wizard. `enter` changes the highlighted setting (game folders
+are checked: the install folder must hold `bin_ship/DAOrigins.exe`), `delete` puts it back to
+its default by removing its line from `config.toml`. Changes are written to `config.toml` line
+by line, so your own comments and layout stay; most take effect at once, the library and
+downloads folders after a restart. A new API key is checked with Nexus before it is saved.
+
+The setup wizard walks through the game's folders, the Nexus API key, the nxm:// handler and
+the game's setup (LAA patch, developer console, a program for `.rar` archives). It starts by
+itself on the first start (there is no `config.toml` yet; finishing it creates one) and
+whenever the game's folders cannot be found; the settings run it again.
+
+`config.toml` can still be edited by hand. Windows paths go in single quotes there, or use
+forward slashes: in double quotes TOML reads `\` as the start of an escape sequence, e.g.
+`game_user_dir = 'C:\Users\yourname\Documents\BioWare\Dragon Age'`. The settings screen writes
+them that way.
 
 ## Rar archives
 

@@ -76,18 +76,16 @@ Alternatively clone this repo and run the application with uv:
 
     uv run dao-modman
 
-Then store your personal API key from nexusmods.com where dao-modman finds it:
+On the first start a setup wizard finds the game's folders (or asks for them), takes your
+personal API key from nexusmods.com, offers to register dao-modman for "Mod Manager Download"
+links and checks the game's setup (LAA patch, console, a program for `.rar` archives). The
+settings (`s`) change all of it later, and run the wizard again.
 
-    mkdir -p ~/.config/dao-modman
-    touch ~/.config/dao-modman/.nexus-token
-    chmod 600 ~/.config/dao-modman/.nexus-token
-    # then paste the token into that file, e.g. with your editor
-
-The token is read from the environment variable `NEXUS_API_TOKEN`, else from
-`~/.config/dao-modman/.nexus-token` (the token alone). dao-modman warns if other users can
-read that file. On Windows the file is `%APPDATA%\dao-modman\.nexus-token`.
-Go to [Account Settings/API Keys](https://www.nexusmods.com/settings/api-keys) to create a token. 
-Use your own key and never share it.
+Go to [Account Settings/API Keys](https://www.nexusmods.com/settings/api-keys) to create a key.
+Use your own key and never share it. It is kept in `~/.config/dao-modman/.nexus-token`
+(`%APPDATA%\dao-modman\.nexus-token` on Windows), readable only by you; the environment
+variable `NEXUS_API_TOKEN` takes precedence over it. dao-modman warns if other users can read
+that file.
 
 dao-modman is in beta testing. Nexus Mods allows personal API keys for apps in testing; before
 a public announcement, dao-modman will be registered with Nexus Mods and switch to logging in
@@ -141,6 +139,7 @@ The bar at the bottom shows the everyday keys; `?` lists all of them.
 | `h`              | hide / show the game's official DLC      |
 | `/`              | filter by name or group (`esc` clears)   |
 | `t`              | tools (LAA, textures, all conflicts ...) |
+| `s`              | settings and the setup wizard            |
 | `delete`         | remove mod from the library              |
 
 

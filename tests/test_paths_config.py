@@ -226,3 +226,60 @@ def test_set_option_keeps_the_rest_of_the_file(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="by hand"):
         config.set_option(file, "max_texture_size", 4096)
     assert "max_texture_size = 5" in file.read_text()  # left untouched
+
+
+def test_set_option_writes_text_and_lists_and_removes_keys(tmp_path: Path) -> None:
+    file = tmp_path / "config.toml"
+    file.write_text(
+        '# mine\nignore = [\n    "*.txt",  # text\n    "*.jpg",\n]\nlanguage = "de-de"\n'
+    )
+
+    config.set_option(file, "game_install_dir", r"C:\GOG Games\Dragon Age")
+    assert "game_install_dir = 'C:\\GOG Games\\Dragon Age'\n" in file.read_text()
+    config.set_option(file, "terminal", 'it\'s "quoted"')  # no literal string possible
+    config.set_option(file, "ignore", ["*.txt", "/docs/"])  # a value over several lines
+    config.set_option(file, "launch_command", ["lutris", "lutris:rungame/dao"])
+    raw = config.load_raw(file)
+    assert raw["game_install_dir"] == r"C:\GOG Games\Dragon Age"
+    assert raw["terminal"] == 'it\'s "quoted"'
+    assert raw["ignore"] == ["*.txt", "/docs/"] and raw["language"] == "de-de"
+    assert raw["launch_command"] == ["lutris", "lutris:rungame/dao"]
+    assert file.read_text().startswith("# mine\nignore = ['*.txt', '/docs/']\nlanguage")
+
+    config.set_option(file, "ignore", None)  # back to the default
+    config.set_option(file, "language", None)
+    config.set_option(file, "max_texture_size", None)  # not there: nothing to do
+    assert "ignore" not in config.load_raw(file) and "language" not in config.load_raw(file)
+    assert file.read_text().startswith("# mine\ngame_install_dir")
+    assert config.load_raw(tmp_path / "missing.toml") == {} and config.load_raw(None) == {}
+
+
+def test_save_token(tmp_path: Path) -> None:
+    path = config.save_token(tmp_path / "cfg", "  abc123 \n")
+    assert path.read_text() == "abc123\n"
+    assert config.load_token(tmp_path / "cfg", environment=False) == "abc123"
+    if os.name != "nt":
+        assert path.stat().st_mode & 0o777 == 0o600
+        assert config.token_warning(tmp_path / "cfg") is None
+    config.save_token(tmp_path / "cfg", "")
+    assert not path.exists()
+
+
+def test_validate_settings(tmp_path: Path) -> None:
+    settings = {setting.key: setting for setting in config.SETTINGS}
+    install = tmp_path / "Dragon Age"
+    assert "not the game's install folder" in config.validate(
+        settings["game_install_dir"], str(install)
+    )
+    (install / "BIN_SHIP").mkdir(parents=True)
+    (install / "BIN_SHIP/daorigins.exe").write_bytes(b"MZ")  # found whatever the case
+    assert config.validate(settings["game_install_dir"], str(install)) is None
+    assert "start the game once" in config.validate(settings["game_user_dir"], str(tmp_path / "x"))
+    assert config.validate(settings["game_user_dir"], str(tmp_path)) is None
+    assert "needs {archive}" in config.validate(settings["unrar_command"], ["unrar", "x"])
+    assert config.validate(settings["unrar_command"], ["unrar", "x", "{archive}"]) is None
+    assert config.validate(settings["launch_command"], []) is not None
+    assert config.validate(settings["game_app_id"], "abc") is not None
+    assert config.validate(settings["max_texture_size"], 2048) is None
+    assert config.validate(settings["max_texture_size"], 333) is not None
+    assert config.validate(settings["language"], "de-de") is None

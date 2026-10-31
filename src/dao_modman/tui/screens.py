@@ -221,16 +221,19 @@ class KeysScreen(ModalScreen[None]):
 class TextPromptScreen(ModalScreen[str | None]):
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, title: str, value: str = "", placeholder: str = "") -> None:
+    def __init__(
+        self, title: str, value: str = "", placeholder: str = "", *, password: bool = False
+    ) -> None:
         super().__init__()
         self.title_text = title
         self.value = value
         self.placeholder = placeholder
+        self.password = password  # typed text is not shown, e.g. an API key
 
     def compose(self) -> ComposeResult:
         with Vertical(classes="dialog"):
             yield Label(self.title_text, classes="title", markup=False)
-            yield Input(value=self.value, placeholder=self.placeholder)
+            yield Input(value=self.value, placeholder=self.placeholder, password=self.password)
             yield Label("[b]enter[/] ok   [b]esc[/] cancel", classes="hint")
 
     @on(Input.Submitted)

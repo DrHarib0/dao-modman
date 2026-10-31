@@ -1195,7 +1195,8 @@ async def test_tools_menu_sets_the_texture_size_limit(
 ) -> None:
     file = tmp_path / "config.toml"
     file.write_text('# keep me\nterminal = "kitty"\n')
-    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir, config_file=file))
+    found = {"game_user_dir": user_dir, "game_install_dir": tmp_path}  # no setup wizard
+    app = ModManApp(Config(dirs=dirs, config_file=file, **found))
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("t")
         labels = [str(option.prompt) for option in app.screen.query_one(OptionList).options]

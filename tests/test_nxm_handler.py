@@ -77,6 +77,35 @@ def test_install_and_uninstall_on_linux(tmp_path: Path, linux: list[list[str]]) 
     assert nxm_handler.uninstall() == ["dao-modman was not registered as nxm:// handler"]
 
 
+def test_status_on_linux(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(nxm_handler, "WINDOWS", False)
+    monkeypatch.setattr(nxm_handler.Path, "home", lambda: tmp_path)
+    monkeypatch.setattr(nxm_handler.shutil, "which", lambda _: "/usr/bin/xdg-mime")
+    default = {"out": ""}
+
+    def run(command: list[str], **_: object) -> nxm_handler.subprocess.CompletedProcess:
+        return nxm_handler.subprocess.CompletedProcess(command, 0, default["out"] + "\n", "")
+
+    monkeypatch.setattr(nxm_handler.subprocess, "run", run)
+    assert nxm_handler.status() == (nxm_handler.NONE, "")
+    default["out"] = "other.desktop"
+    assert nxm_handler.status() == (nxm_handler.OTHER, "other.desktop")
+    default["out"] = "dao-modman-nxm.desktop"
+    assert nxm_handler.status() == (nxm_handler.OURS, "")
+
+
+def test_status_on_windows(registry: dict[str, dict[str, str]], monkeypatch) -> None:
+    def value(subkey: str, name: str = "", *, machine: bool = True) -> str | None:
+        return registry.get(subkey, {}).get(name) or None  # machine-wide entries count here
+
+    monkeypatch.setattr(nxm_handler.windows, "registry_value", value)
+    assert nxm_handler.status() == (nxm_handler.NONE, "")
+    registry[nxm_handler.REGISTRY_COMMAND] = {"": '"Vortex.exe" -d "%1"'}
+    assert nxm_handler.status() == (nxm_handler.OTHER, '"Vortex.exe" -d "%1"')
+    nxm_handler.install()
+    assert nxm_handler.status() == (nxm_handler.OURS, "")
+
+
 def test_install_without_xdg_mime(linux: list[list[str]], monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(nxm_handler.shutil, "which", lambda _: None)
     with pytest.raises(nxm_handler.HandlerError, match="xdg-mime was not found"):

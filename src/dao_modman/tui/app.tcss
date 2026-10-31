@@ -112,6 +112,26 @@ ModalScreen {
     max-height: 24;
 }
 
+#settings, #wizard-actions {
+    height: auto;
+    max-height: 18;
+}
+
+#setting-help, #wizard-text {
+    margin-top: 1;
+    color: $text-muted;
+}
+
+#wizard-text {
+    color: $text;
+    margin-top: 0;
+    margin-bottom: 1;
+}
+
+#patterns {
+    height: 16;
+}
+
 #groups {
     height: auto;
     max-height: 10;

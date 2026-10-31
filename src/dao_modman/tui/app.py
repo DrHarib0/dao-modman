@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import os
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -34,7 +35,14 @@ from ..core import (
     revisions,
     textures,
 )
-from ..core.config import TOKEN_FILE, TOKEN_VAR, Config, set_option
+from ..core.config import (
+    TOKEN_VAR,
+    Config,
+    ConfigError,
+    load_config,
+    save_token,
+    set_option,
+)
 from ..core.dazip import AddIn
 from ..core.install import install_from_nexus, link_to_nexus
 from ..core.library import Library, LibraryError
@@ -64,6 +72,7 @@ from .screens import (
     TextScreen,
     UnapplyScreen,
 )
+from .settings import SettingsScreen, SetupWizard
 
 ENABLED = "✓"
 T = TypeVar("T")
@@ -136,6 +145,13 @@ KEYS = [
     Key("l", "launch", "Launch", "Launch the game", "Game", footer=True),
     Key("question_mark", "keys", "Keys", "Show this overview", "App", footer=True, display="?"),
     Key("q", "quit", "Quit", "Quit", "App", footer=True),
+    Key(
+        "s",
+        "settings",
+        "Settings",
+        "Settings: game folders, Nexus API key, nxm:// links, setup wizard",
+        "App",
+    ),
     Key("r", "rename", "Rename", "Rename the mod", "Mod list"),
     Key("g", "group", "Group", "Assign the mod to a group", "Mod list"),
     Key("delete", "remove", "Remove", "Remove the mod from the library", "Mod list"),
@@ -162,8 +178,8 @@ SECTIONS = ("Mod list", "Mod contents", "Nexus", "Game", "App")
 
 
 def token_hint() -> str:
-    """Where to put the Nexus API token, with the real path of the config dir."""
-    return f"put it into {paths.config_dir() / TOKEN_FILE} or set {TOKEN_VAR}"
+    """How to give dao-modman the Nexus API token."""
+    return f"enter it in the settings (s), or set {TOKEN_VAR}"
 
 
 def key_overview() -> list[tuple[str, list[tuple[str, str]]]]:
@@ -204,6 +220,7 @@ class ModManApp(App[None]):
     ) -> None:
         super().__init__()
         self.config = config
+        self._transport = transport  # for a Nexus client made later, with a new API key
         self.library = Library(  # loaded by startup
             config.dirs, config.ignore, load=False, unrar_command=config.unrar_command
         )
@@ -273,9 +290,82 @@ class ModManApp(App[None]):
         if self.nexus:
             self.load_account()
         await self.listen()
+        if (step := self._setup_step()) is not None:
+            await self.push_screen_wait(SetupWizard(step))
         for url in self._links:
             if error := self.receive_link(url):
                 self.error(error)
+
+    def _setup_step(self) -> str | None:
+        """Where the setup wizard starts by itself: first start, or the game is not found."""
+        file = self.config.config_file
+        if file is None:
+            return None
+        if not file.exists():
+            return "welcome"
+        if not (self.config.game_user_dir and self.config.game_install_dir):
+            return "game"
+        return None
+
+    def action_settings(self) -> None:
+        self.push_screen(SettingsScreen())
+
+    def config_changed(self) -> None:
+        """Take over config.toml after the settings changed it; most settings apply at once."""
+        old = self.config
+        try:
+            fresh = load_config(old.config_file)
+        except ConfigError as exc:
+            self.error(exc)
+            return
+        fresh.runtime_dir = old.runtime_dir  # the running instance keeps listening there
+        fresh.nexus_token, fresh.token_warning = old.nexus_token, old.token_warning
+        if fresh.dirs != old.dirs:
+            self.notify("The new library or downloads folder is used after a restart")
+            fresh.dirs = old.dirs
+        self.config = fresh
+        self.library.unrar_command = fresh.unrar_command
+        if fresh.ignore != old.ignore:
+            self.library.set_ignore(fresh.ignore)
+        if (fresh.game_user_dir, fresh.game_install_dir) != (
+            old.game_user_dir,
+            old.game_install_dir,
+        ):
+            self.refresh_foreign()
+        self.refresh_table()
+
+    @work(exclusive=True, group="token")
+    async def use_token(self, token: str, done: Callable[[], None] | None = None) -> None:
+        """Check a new Nexus API key, then save it and use it from now on."""
+        client = NexusClient(token, transport=self._transport)
+        try:
+            account = await client.validate()
+        except NexusError as exc:
+            await client.aclose()
+            self.error(f"Nexus did not accept the key: {exc}")
+            return
+        directory = (
+            self.config.config_file.parent if self.config.config_file else paths.config_dir()
+        )
+        try:
+            save_token(directory, token)
+        except OSError as exc:
+            await client.aclose()
+            self.error(exc)
+            return
+        if self.nexus:
+            await self.nexus.aclose()
+        self.nexus, self.account = client, account
+        self.config.nexus_token, self.config.token_warning = token, None
+        self.refresh_status()
+        kind = "premium" if account.get("is_premium") else "free"
+        self.notify(
+            f"Nexus API key saved: account {account.get('name', '?')} ({kind})", markup=False
+        )
+        if os.environ.get(TOKEN_VAR, "").strip():
+            self.notify(f"{TOKEN_VAR} is set and wins at the next start", severity="warning")
+        if done:
+            done()
 
     def _startup_checks(self, progress: deploy.Progress) -> _Startup:
         """Everything the mod list needs at start; runs in a thread. Problems are collected."""
@@ -490,7 +580,7 @@ class ModManApp(App[None]):
             deployed = "yes, up to date"
         status = f"Nexus: {account}  |  Applied: {deployed}"
         if not self.config.game_user_dir:  # worth a place only while it is a problem
-            status = f"Game user dir not found (set it in config.toml)  |  {status}"
+            status = f"Game user folder not found (set it in the settings, s)  |  {status}"
         if self.filter_text:
             shown = sum(mod_id is not None for mod_id in self._row_ids)
             status = (
@@ -882,7 +972,7 @@ class ModManApp(App[None]):
     def action_apply(self) -> None:
         user_dir = self.config.game_user_dir
         if not user_dir:
-            self.error("Game user dir not found: set game_user_dir in config.toml")
+            self.error("Game user folder not found: set it in the settings (s)")
             return
         self.refresh_foreign()
         try:
@@ -1153,7 +1243,7 @@ class ModManApp(App[None]):
         """Take the files we do not manage into the library, then offer to apply."""
         user_dir = self.config.game_user_dir
         if not user_dir or not user_dir.is_dir():
-            self.error("Game user dir not found: set game_user_dir in config.toml")
+            self.error("Game user folder not found: set it in the settings (s)")
             return
         try:
             found = adopt.find(
@@ -1226,7 +1316,7 @@ class ModManApp(App[None]):
         """Open the guide to getting a DRM-free executable, then install the one the user names."""
         install_dir = self.config.game_install_dir
         if not install_dir:
-            self.error("Game install dir not found: set game_install_dir in config.toml")
+            self.error("Game install folder not found: set it in the settings (s)")
             return
 
         def done(path: str | None) -> None:
@@ -1249,7 +1339,7 @@ class ModManApp(App[None]):
     def run_tool(self, tool: str) -> None:
         install_dir = self.config.game_install_dir
         if not install_dir:
-            self.error("Game install dir not found: set game_install_dir in config.toml")
+            self.error("Game install folder not found: set it in the settings (s)")
             return
         try:
             if tool == "laa_restore":

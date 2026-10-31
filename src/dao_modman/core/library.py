@@ -69,6 +69,12 @@ class Library:
         if load:
             self.reload()
 
+    def set_ignore(self, patterns: Iterable[str]) -> None:
+        """Use other ignore rules; each mod's kind depends on them, so it is worked out again."""
+        self.ignore = IgnoreRules(patterns)
+        for mod in self.mods.values():
+            mod.kind = pathops.kind(self.list_files(mod.id), self.ignore.matches)
+
     # -- loading / saving -------------------------------------------------
 
     def reload(self, progress: Callable[[str, int, int], None] | None = None) -> None:

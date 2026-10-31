@@ -36,6 +36,35 @@ class HandlerError(Exception):
     pass
 
 
+OURS = "ours"
+OTHER = "other"  # another program handles nxm:// links
+NONE = "none"
+
+
+def status() -> tuple[str, str]:
+    """Who handles nxm:// links: (OURS | OTHER | NONE, the other program's command or entry)."""
+    if WINDOWS:
+        current = windows.registry_value(REGISTRY_COMMAND) or ""
+        if not current:
+            return NONE, ""
+        return (OURS, "") if MARK in current else (OTHER, current)
+    default = ""
+    if shutil.which("xdg-mime"):
+        try:
+            result = subprocess.run(
+                ["xdg-mime", "query", "default", MIME_TYPE],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            default = result.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            pass
+    if default == DESKTOP_FILE or (not default and _desktop_file().is_file()):
+        return OURS, ""
+    return (OTHER, default) if default else (NONE, "")
+
+
 def install() -> list[str]:
     """Register the handler; returns what was done, for the user."""
     return _install_windows() if WINDOWS else _install_linux()
