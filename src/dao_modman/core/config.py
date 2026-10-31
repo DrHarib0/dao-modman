@@ -28,6 +28,7 @@ class Config:
     game_install_dir: Path | None = None
     game_app_id: str | None = None  # Steam app id, for launching the game
     launch_command: list[str] | None = None  # starts the game instead of Steam, e.g. Lutris
+    unrar_command: list[str] | None = None  # extracts .rar when no known tool is found
     nexus_token: str | None = None
     token_warning: str | None = None  # the token file is readable by other users
     terminal: str | None = None  # terminal emulator for windows opened by the nxm handler
@@ -105,16 +106,21 @@ def load_config() -> Config:
         value = raw.get(key)
         return Path(value).expanduser() if value else None
 
-    command = raw.get("launch_command")
-    if command is not None and (
-        not isinstance(command, list)
-        or not command
-        or not all(isinstance(part, str) and part for part in command)
-    ):
-        raise ConfigError(
-            f"{config_file}: launch_command must be a list of arguments, "
-            'e.g. ["lutris", "lutris:rungame/dragon-age-origins"]'
-        )
+    def command_option(key: str, example: str) -> list[str] | None:
+        command = raw.get(key)
+        if command is not None and (
+            not isinstance(command, list)
+            or not command
+            or not all(isinstance(part, str) and part for part in command)
+        ):
+            raise ConfigError(f"{config_file}: {key} must be a list of arguments, e.g. {example}")
+        return command
+
+    command = command_option("launch_command", '["lutris", "lutris:rungame/dragon-age-origins"]')
+    unrar_example = """['C:/Tools/unrar.exe', 'x', '-y', '{archive}', '{dest}/']"""
+    unrar_command = command_option("unrar_command", unrar_example)
+    if unrar_command and not any("{archive}" in part for part in unrar_command):
+        raise ConfigError(f"{config_file}: unrar_command needs {{archive}}, e.g. {unrar_example}")
 
     data = path_option("data_dir") or paths.data_dir()
     dirs = Dirs(data=data, downloads=path_option("downloads_dir") or data / "downloads")
@@ -124,6 +130,7 @@ def load_config() -> Config:
         game_install_dir=path_option("game_install_dir") or paths.find_game_install_dir(),
         game_app_id=str(raw.get("game_app_id") or "") or paths.find_game_app_id(),
         launch_command=command,
+        unrar_command=unrar_command,
         nexus_token=load_token(config_dir),
         token_warning=token_warning(config_dir),
         terminal=str(raw["terminal"]) if raw.get("terminal") else None,

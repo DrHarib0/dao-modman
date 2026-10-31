@@ -20,8 +20,27 @@ which on Steam/Proton is
     ~/.config/dao-modman/config.toml   # optional overrides, see below
 
 `config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `game_app_id`,
-`launch_command`, `data_dir`, `downloads_dir`, `terminal`, `ignore`, `language`,
-`max_texture_size`.
+`launch_command`, `unrar_command`, `data_dir`, `downloads_dir`, `terminal`, `ignore`,
+`language`, `max_texture_size`.
+
+Windows paths go in single quotes, or use forward slashes: in double quotes TOML reads `\` as
+the start of an escape sequence, e.g. `game_user_dir = 'C:\Users\yourname\Documents\BioWare\Dragon Age'`.
+
+## Rar archives
+
+No Python library reads `.rar`, so an external program extracts them: `unrar`, `7z` or
+`bsdtar` from PATH, tried in that order (`bsdtar` cannot read solid archives, which are
+common). On Windows, where neither installer adds itself to PATH, WinRAR's `UnRAR.exe` and
+7-Zip's `7z.exe` are also found through the registry or in `C:\Program Files`. Windows' own
+`tar.exe` is not used, since it cannot read solid archives either.
+
+If none of them is there or all fail, `unrar_command` in `config.toml` is tried last: the
+program and its arguments, as a list. `{archive}` is replaced by the archive's path, `{dest}`
+by the folder to extract into, and the command runs inside that folder:
+
+    unrar_command = ['C:\Tools\unrar.exe', 'x', '-y', '{archive}', '{dest}\']
+
+The command must not write outside `{dest}`; `unrar` and `7z` refuse to by default.
 
 ## Other installs (Lutris, Wine)
 

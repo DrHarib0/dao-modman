@@ -105,7 +105,10 @@ Most functionality is also exposed via a command line interface:
     dao-modman conflicts                   # which mods ship the same files, and who wins
 
 `.rar` archives need `unrar`, `7z` or `bsdtar` on PATH; they are tried in that order, since
-`bsdtar` cannot read solid archives. Some mods on Nexus are only available as `.rar`.
+`bsdtar` cannot read solid archives. On Windows, WinRAR and 7-Zip are also found where they are
+installed. Failing all of these, `unrar_command` in `config.toml` sets the command to use, see
+the [documentation](https://github.com/DrHarib0/dao-modman/blob/main/docs/Readme.md#rar-archives).
+Some mods on Nexus are only available as `.rar`.
 
 
 ## UI Hotkeys

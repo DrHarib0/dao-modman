@@ -47,10 +47,19 @@ def slugify(name: str) -> str:
 
 class Library:
     def __init__(
-        self, dirs: Dirs, ignore: Iterable[str] | None = None, *, load: bool = True
+        self,
+        dirs: Dirs,
+        ignore: Iterable[str] | None = None,
+        *,
+        load: bool = True,
+        unrar_command: list[str] | None = None,
     ) -> None:
-        """With `load=False` the library starts empty, until `reload` is called."""
+        """With `load=False` the library starts empty, until `reload` is called.
+
+        `unrar_command` (from config.toml) extracts .rar archives if no known tool is found.
+        """
         self.dirs = dirs
+        self.unrar_command = unrar_command
         self.ignore = IgnoreRules(DEFAULT_PATTERNS if ignore is None else ignore)
         dirs.ensure()
         self.mods: dict[str, Mod] = {}
@@ -216,11 +225,11 @@ class Library:
     def _stage(self, archive: Path, stage: Path) -> Path:
         """Extract into `stage/files`; packages inside become folders of the same name."""
         files = stage / FILES_DIR
-        archives.extract(archive, files)
+        archives.extract(archive, files, self.unrar_command)
         for nested in archives.list_files(files):
             if nested.lower().endswith((".dazip", ".override")):
                 unpacked = stage / "unpacked"
-                archives.extract(files / nested, unpacked)
+                archives.extract(files / nested, unpacked, self.unrar_command)
                 (files / nested).unlink()
                 unpacked.rename(files / nested)
         return files

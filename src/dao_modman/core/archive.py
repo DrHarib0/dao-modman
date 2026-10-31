@@ -11,6 +11,7 @@ from pathlib import Path
 
 import py7zr
 
+from . import windows
 from .paths import normalize_rel
 
 _CHUNK = 1024 * 1024
@@ -63,22 +64,60 @@ def _extract_7z(archive: Path, dest: Path) -> None:
         sz.extractall(dest)
 
 
-def _extract_rar(archive: Path, dest: Path) -> None:
+def find_tool(name: str) -> str | None:
+    """The program `name` on PATH; on Windows also where 7-Zip or WinRAR is installed.
+
+    Neither installer adds itself to PATH. bsdtar is not looked for: Windows' own tar.exe is
+    one, but cannot read solid archives.
+    """
+    if found := shutil.which(name):
+        return found
+    if name == "7z":
+        key = r"SOFTWARE\7-Zip"
+        folders = [windows.registry_value(key, "Path64"), windows.registry_value(key, "Path")]
+        folders += [windows.app_folder("7zFM.exe")]
+        folders += [folder / "7-Zip" for folder in windows.program_files()]
+        path = windows.find_program("7z.exe", folders)
+    elif name == "unrar":
+        folders = [windows.app_folder("WinRAR.exe")]
+        folders += [folder / "WinRAR" for folder in windows.program_files()]
+        path = windows.find_program("UnRAR.exe", folders)
+    else:
+        path = None
+    return str(path) if path else None
+
+
+def _extract_rar(archive: Path, dest: Path, unrar_command: list[str] | None = None) -> None:
     """Extract with whichever tool manages: no pure-Python rar reader exists.
 
     unrar and 7z come first because bsdtar cannot read solid archives, which are common.
-    All three refuse to write outside the target directory by default.
+    All three refuse to write outside the target directory by default. `unrar_command`, from
+    config.toml, is the last resort: `{archive}` and `{dest}` in it are replaced, and it runs
+    inside `dest`.
     """
-    commands = {
-        "unrar": ["unrar", "x", "-y", "-o+", str(archive), f"{dest}{os.sep}"],
-        "7z": ["7z", "x", "-y", f"-o{dest}", str(archive)],
-        "bsdtar": ["bsdtar", "-xf", str(archive), "-C", str(dest)],
-    }
+    commands: dict[str, list[str]] = {}
+    if unrar := find_tool("unrar"):
+        commands["unrar"] = [unrar, "x", "-y", "-o+", str(archive), f"{dest}{os.sep}"]
+    if sevenzip := find_tool("7z"):
+        commands["7z"] = [sevenzip, "x", "-y", f"-o{dest}", str(archive)]
+    if bsdtar := find_tool("bsdtar"):
+        commands["bsdtar"] = [bsdtar, "-xf", str(archive), "-C", str(dest)]
+    if unrar_command:
+        archive_path, dest_path = str(archive.resolve()), str(dest.resolve())
+        commands["unrar_command"] = [
+            part.replace("{archive}", archive_path).replace("{dest}", dest_path)
+            for part in unrar_command
+        ]
     failures = []
     for tool, command in commands.items():
-        if not shutil.which(tool):
+        cwd = dest if tool == "unrar_command" else None
+        try:
+            result = subprocess.run(
+                command, capture_output=True, text=True, stdin=subprocess.DEVNULL, cwd=cwd
+            )
+        except OSError as exc:  # e.g. the configured program does not exist
+            failures.append(f"{tool}: {exc}")
             continue
-        result = subprocess.run(command, capture_output=True, text=True, stdin=subprocess.DEVNULL)
         if result.returncode == 0:
             return
         detail = (result.stderr or result.stdout).strip().splitlines()
@@ -86,7 +125,10 @@ def _extract_rar(archive: Path, dest: Path) -> None:
         shutil.rmtree(dest)  # whatever the failed tool left behind must not be imported
         dest.mkdir()
     if not failures:
-        raise ArchiveError("rar archives need one of unrar, 7z or bsdtar on PATH")
+        raise ArchiveError(
+            "rar archives need unrar, 7z or bsdtar (on Windows: WinRAR or 7-Zip), "
+            "or unrar_command in config.toml"
+        )
     raise ArchiveError(f"cannot extract {archive.name} ({'; '.join(failures)})")
 
 
@@ -99,8 +141,11 @@ def _drop_links(dest: Path) -> None:
                 path.unlink()
 
 
-def extract(archive: Path, dest: Path) -> None:
-    """Extract `archive` into the (new or empty) directory `dest`."""
+def extract(archive: Path, dest: Path, unrar_command: list[str] | None = None) -> None:
+    """Extract `archive` into the (new or empty) directory `dest`.
+
+    `unrar_command`: see `_extract_rar`.
+    """
     dest.mkdir(parents=True, exist_ok=True)
     with archive.open("rb") as fh:
         magic = fh.read(8)
@@ -108,7 +153,7 @@ def extract(archive: Path, dest: Path) -> None:
         if magic.startswith(_SEVENZIP_MAGIC):
             _extract_7z(archive, dest)
         elif magic.startswith(_RAR_MAGIC):
-            _extract_rar(archive, dest)
+            _extract_rar(archive, dest, unrar_command)
         elif zipfile.is_zipfile(archive):
             _extract_zip(archive, dest)
         else:

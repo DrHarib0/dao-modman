@@ -110,9 +110,28 @@ def test_launch_command_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert config.load_config().launch_command == ["lutris", "lutris:rungame/dragon-age-origins"]
 
 
+def test_unrar_command_from_config(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "cfg"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    config_file = tmp_path / "cfg" / paths.APP_NAME / "config.toml"
+    config_file.parent.mkdir(parents=True)
+    config_file.write_text("")
+    assert config.load_config().unrar_command is None
+
+    config_file.write_text("unrar_command = ['C:\\Tools\\unrar.exe', 'x', '{archive}']\n")
+    assert config.load_config().unrar_command == ["C:\\Tools\\unrar.exe", "x", "{archive}"]
+
+
 @pytest.mark.parametrize(
     "text",
-    ['launch_command = "lutris"', "launch_command = []", 'launch_command = ["a", 1]', "x = ["],
+    [
+        'launch_command = "lutris"',
+        "launch_command = []",
+        'launch_command = ["a", 1]',
+        'unrar_command = "unrar"',
+        'unrar_command = ["unrar", "x", "{dest}"]',  # no {archive}
+        "x = [",
+    ],
 )
 def test_bad_config_is_reported(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str], text: str

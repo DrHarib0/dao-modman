@@ -204,7 +204,9 @@ class ModManApp(App[None]):
     ) -> None:
         super().__init__()
         self.config = config
-        self.library = Library(config.dirs, config.ignore, load=False)  # loaded by startup
+        self.library = Library(  # loaded by startup
+            config.dirs, config.ignore, load=False, unrar_command=config.unrar_command
+        )
         self.game_data = moditems.GameData()  # read on demand, kept for the session
         self.nexus = (
             NexusClient(config.nexus_token, transport=transport) if config.nexus_token else None

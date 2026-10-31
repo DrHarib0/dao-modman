@@ -95,7 +95,7 @@ def cmd_install_nxm_handler() -> int:
 
 
 def _library(config: Config) -> Library:
-    return Library(config.dirs, config.ignore)
+    return Library(config.dirs, config.ignore, unrar_command=config.unrar_command)
 
 
 def cmd_laa(action: str, exe: Path | None) -> int:
