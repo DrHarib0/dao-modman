@@ -471,11 +471,12 @@ def test_scan_and_clean_the_mod_directories(
     deploy.unapply(deployed)
     assert deploy.clean(user_dir, deployed, install_dir) == 5
 
-    assert tree(user_dir) == [
-        "AddIns/bought_dlc/core/data/dlc.erf",  # official DLC is never touched
-        "Characters/save.das",
-        "Settings/AddIns.xml",
-        "Settings/DragonAge.ini",
+    # ignoring case: on Windows the hand-made AddIns/ files went into the mod's addins/ folder
+    assert sorted(path.casefold() for path in tree(user_dir)) == [
+        "addins/bought_dlc/core/data/dlc.erf",  # official DLC is never touched
+        "characters/save.das",
+        "settings/addins.xml",
+        "settings/dragonage.ini",
     ]
     assert addin_uids(user_dir) == ["DAO_PRC_EP_1", "bought_dlc"]
     assert (user_dir / OVERRIDE).is_dir() and not (user_dir / "packages/core/data").exists()
