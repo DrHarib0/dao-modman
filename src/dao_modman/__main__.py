@@ -110,12 +110,14 @@ def cmd_laa(action: str, exe: Path | None) -> int:
         if action == "patch":
             if exe is None:
                 print(
-                    "error: pass the LAA-patched executable with --exe PATH; how to get one:\n"
-                    f"  {laa.GUIDE_URL}",
+                    "error: pass a DRM-free or LAA-patched executable with --exe PATH; "
+                    f"how to get one:\n  {laa.GUIDE_URL}",
                     file=sys.stderr,
                 )
                 return 1
-            backup = laa.patch(install_dir, exe)
+            backup, was_flagged = laa.patch(install_dir, exe)
+            if was_flagged:
+                print(f"set the LAA flag on the installed copy of {exe}")
             print(f"patched {laa.game_exe(install_dir)}\noriginal saved as {backup}")
         elif action == "restore":
             print(f"restored {laa.restore(install_dir)}")
@@ -196,7 +198,9 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser("install-nxm-handler", help="register dao-modman for nxm:// links")
     laa_cmd = commands.add_parser("laa", help="Large Address Aware patch for the game exe")
     laa_cmd.add_argument("action", choices=["status", "patch", "restore"])
-    laa_cmd.add_argument("--exe", type=Path, help="LAA-patched executable to install (for patch)")
+    laa_cmd.add_argument(
+        "--exe", type=Path, help="DRM-free or LAA-patched executable to install (for patch)"
+    )
     console_cmd = commands.add_parser("console", help="enable the game's developer console")
     console_cmd.add_argument("action", choices=["status", "enable", "disable"])
     commands.add_parser(

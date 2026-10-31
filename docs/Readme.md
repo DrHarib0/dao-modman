@@ -355,10 +355,13 @@ manifest claims.
 ## Large Address Aware (LAA) patch
 
 A heavily modded game runs out of memory unless the executable is Large Address Aware. The
-Steam executable cannot simply be flagged in place, and dao-modman does not ship a patched
-one: [this guide](https://steamcommunity.com/sharedfiles/filedetails/?id=233222451) explains
-how to get it. The LAA entry in Tools opens the guide in the browser and asks for the path of
-your patched `DAOrigins.exe`; on the command line it is `dao-modman laa patch --exe PATH`.
+Steam executable carries DRM that breaks when its header changes, so it cannot simply be
+flagged in place, and dao-modman does not ship an executable:
+[this guide](https://steamcommunity.com/sharedfiles/filedetails/?id=233222451) explains how
+to get a DRM-free or already patched one. The LAA entry in Tools opens the guide in the
+browser and asks for the path of that `DAOrigins.exe`; on the command line it is
+`dao-modman laa patch --exe PATH`. A DRM-free executable without the flag is flagged on the
+way in (the file itself is left as it is); one with Steam's DRM is refused.
 The file is copied over `bin_ship/DAOrigins.exe` in the game's install dir, and the original
 is kept next to it as `DAOrigins.exe.pre-laa`; `laa restore` puts it back. Steam's "verify integrity of game files"
 also restores the original, after which the patch has to be applied again.

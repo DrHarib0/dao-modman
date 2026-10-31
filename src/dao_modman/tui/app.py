@@ -1217,7 +1217,7 @@ class ModManApp(App[None]):
         self.push_screen(TextScreen("Character creator list", text))
 
     def patch_laa(self) -> None:
-        """Open the guide to getting an LAA executable, then install the one the user names."""
+        """Open the guide to getting a DRM-free executable, then install the one the user names."""
         install_dir = self.config.game_install_dir
         if not install_dir:
             self.error("Game install dir not found: set game_install_dir in config.toml")
@@ -1227,14 +1227,17 @@ class ModManApp(App[None]):
             if not path:
                 return
             try:
-                backup = laa.patch(install_dir, Path(path))
+                backup, was_flagged = laa.patch(install_dir, Path(path))
             except laa.LaaError as exc:
                 self.error(exc)
                 return
-            self.notify(f"LAA patch applied, original saved as {backup.name}", markup=False)
+            how = "LAA flag set and patch applied" if was_flagged else "LAA patch applied"
+            self.notify(f"{how}, original saved as {backup.name}", markup=False)
 
         self.open_url(laa.GUIDE_URL)
-        title = "Path of your LAA-patched DAOrigins.exe (the guide is open in your browser)"
+        title = (
+            "Path of a DRM-free or LAA-patched DAOrigins.exe (the guide is open in your browser)"
+        )
         self.push_screen(TextPromptScreen(title, placeholder="/path/to/DAOrigins.exe"), done)
 
     def run_tool(self, tool: str) -> None:
