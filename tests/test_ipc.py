@@ -93,8 +93,11 @@ def handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
     seen: dict = {"config": config, "spawned": [], "sent": [], "reported": [], "apps": []}
     monkeypatch.setattr(cli, "load_config", lambda: config)
     monkeypatch.setattr(cli, "_report", seen["reported"].append)
-    monkeypatch.setattr(cli.terminal, "command", lambda configured, argv: [configured, *argv])
-    monkeypatch.setattr(cli.subprocess, "Popen", lambda argv, **_: seen["spawned"].append(argv))
+    monkeypatch.setattr(
+        cli.terminal,
+        "open_window",
+        lambda configured, argv: seen["spawned"].append([configured, *argv]),
+    )
     monkeypatch.setattr(cli.ipc, "send_link", lambda directory, url: seen["sent"].append(url))
 
     class FakeApp:
@@ -113,7 +116,8 @@ def handler(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict:
 def test_handler_starts_a_terminal_when_nothing_runs(handler: dict) -> None:
     handler["config"].terminal = "kitty"
     assert cli.main(["nxm", LINK]) == 0
-    assert handler["spawned"] == [["kitty", cli.sys.executable, "-m", "dao_modman", "--nxm", LINK]]
+    python = cli.windows.console_python()  # not pythonw.exe, which runs the handler on Windows
+    assert handler["spawned"] == [["kitty", python, "-m", "dao_modman", "--nxm", LINK]]
     assert handler["sent"] == []
 
 
@@ -146,9 +150,9 @@ def test_handler_reports_problems_to_the_desktop(
     assert cli.main(["nxm", "https://example.com/not-a-link"]) == 1
     assert handler["spawned"] == []
 
-    def no_terminal(configured: str | None, argv: list[str]) -> list[str]:
+    def no_terminal(configured: str | None, argv: list[str]) -> None:
         raise cli.terminal.TerminalError("no terminal emulator found")
 
-    monkeypatch.setattr(cli.terminal, "command", no_terminal)
+    monkeypatch.setattr(cli.terminal, "open_window", no_terminal)
     assert cli.main(["nxm", LINK]) == 1
     assert handler["reported"] == ["not a valid nxm:// link", "no terminal emulator found"]

@@ -3,13 +3,24 @@
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
 
-from .core import console, deploy, ipc, laa, nexus, paths, report, revisions, terminal
+from .core import (
+    console,
+    deploy,
+    ipc,
+    laa,
+    nexus,
+    nxm_handler,
+    paths,
+    report,
+    revisions,
+    terminal,
+    windows,
+)
 from .core.config import (
     TOKEN_FILE,
     TOKEN_VAR,
@@ -22,22 +33,15 @@ from .core.config import (
 from .core.library import Library
 from .core.nexus import NexusError
 
-DESKTOP_FILE = "dao-modman-nxm.desktop"
-DESKTOP_ENTRY = """[Desktop Entry]
-Type=Application
-Name=dao-modman (nxm links)
-Exec="{python}" -m dao_modman nxm %u
-Terminal=false
-NoDisplay=true
-MimeType=x-scheme-handler/nxm;
-"""
-
 
 def _report(message: str) -> None:
     """The handler has no terminal of its own, so errors also go to the desktop."""
-    print(f"error: {message}", file=sys.stderr)
+    if sys.stderr:  # None under pythonw.exe
+        print(f"error: {message}", file=sys.stderr)
     if shutil.which("notify-send"):
         subprocess.run(["notify-send", "--app-name=dao-modman", "dao-modman", message], check=False)
+    else:
+        windows.message_box("dao-modman", message)
 
 
 def _forward(config: Config, url: str) -> bool:
@@ -54,34 +58,32 @@ def cmd_nxm(url: str) -> int:
     try:
         nexus.parse_nxm(url)
         if not _forward(config, url):
-            argv = [sys.executable, "-m", "dao_modman", "--nxm", url]
-            subprocess.Popen(
-                terminal.command(config.terminal, argv),
-                start_new_session=True,
-                stdin=subprocess.DEVNULL,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
+            # python.exe on Windows: the handler itself runs windowless, under pythonw.exe
+            argv = [windows.console_python(), "-m", "dao_modman", "--nxm", url]
+            terminal.open_window(config.terminal, argv)
     except (NexusError, ipc.IpcError, terminal.TerminalError, OSError) as exc:
         _report(str(exc))
         return 1
     return 0
 
 
-def cmd_install_nxm_handler() -> int:
-    applications = Path.home() / ".local/share/applications"
-    applications.mkdir(parents=True, exist_ok=True)
-    desktop = applications / DESKTOP_FILE
-    desktop.write_text(DESKTOP_ENTRY.format(python=sys.executable), encoding="utf-8")
-    print(f"wrote {desktop}")
-    if not shutil.which("xdg-mime"):
-        print("xdg-mime not found: register the nxm:// handler manually", file=sys.stderr)
+def cmd_nxm_uninstall() -> int:
+    try:
+        lines = nxm_handler.uninstall()
+    except nxm_handler.HandlerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
         return 1
-    # On KDE, xdg-mime calls qtpaths, which some distros keep outside PATH.
-    env = {**os.environ, "PATH": f"{os.environ.get('PATH', '')}:/usr/lib/qt6/bin"}
-    command = ["xdg-mime", "default", DESKTOP_FILE, "x-scheme-handler/nxm"]
-    subprocess.run(command, check=True, env=env)
-    print("registered as handler for nxm:// links")
+    print("\n".join(lines))
+    return 0
+
+
+def cmd_nxm_install() -> int:
+    try:
+        lines = nxm_handler.install()
+    except nxm_handler.HandlerError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    print("\n".join(lines))
     # The browser starts the handler: it rarely sees the variables set in a shell.
     config_dir = paths.config_dir()
     if not load_token(config_dir, environment=False):
@@ -193,9 +195,15 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dao-modman", description=__doc__)
     commands = parser.add_subparsers(dest="command")
     parser.add_argument("--nxm", metavar="URL", help="start the TUI and download this link")
-    nxm = commands.add_parser("nxm", help="hand a 'Mod Manager Download' link to the TUI")
-    nxm.add_argument("url")
-    commands.add_parser("install-nxm-handler", help="register dao-modman for nxm:// links")
+    nxm = commands.add_parser(
+        "nxm", help="hand a 'Mod Manager Download' link to the TUI, or (un)register the handler"
+    )
+    nxm.add_argument("url", nargs="?")
+    nxm_setup = nxm.add_mutually_exclusive_group()
+    nxm_setup.add_argument(
+        "--install-handler", action="store_true", help="register dao-modman for nxm:// links"
+    )
+    nxm_setup.add_argument("--uninstall-handler", action="store_true", help="unregister it again")
     laa_cmd = commands.add_parser("laa", help="Large Address Aware patch for the game exe")
     laa_cmd.add_argument("action", choices=["status", "patch", "restore"])
     laa_cmd.add_argument(
@@ -214,6 +222,10 @@ def main(argv: list[str] | None = None) -> int:
         "chargen", help="report on the merged character creator list and its broken entries"
     )
     args = parser.parse_args(argv)
+    if args.command == "nxm":
+        given = [args.url is not None, args.install_handler, args.uninstall_handler]
+        if sum(given) != 1:
+            nxm.error("give a link, --install-handler or --uninstall-handler (one of them)")
     try:
         return _run(args)
     except ConfigError as exc:
@@ -223,6 +235,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def _run(args: argparse.Namespace) -> int:
     if args.command == "nxm":
+        if args.install_handler:
+            return cmd_nxm_install()
+        if args.uninstall_handler:
+            return cmd_nxm_uninstall()
         return cmd_nxm(args.url)
     if args.command == "chargen":
         return cmd_chargen()
@@ -234,8 +250,6 @@ def _run(args: argparse.Namespace) -> int:
         return cmd_console(args.action)
     if args.command == "laa":
         return cmd_laa(args.action, args.exe)
-    if args.command == "install-nxm-handler":
-        return cmd_install_nxm_handler()
 
     config = load_config()
     if args.nxm:

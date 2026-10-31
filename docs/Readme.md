@@ -89,20 +89,34 @@ archive. Yes adds it again as another mod.
 
 ### The nxm:// handler
 
-After `dao-modman install-nxm-handler`, clicking "Mod Manager Download" in the browser hands
-the link to the running dao-modman, which shows the download in a panel above the status
-line; several downloads can run side by side. If dao-modman is not running, the handler opens
-it in a new terminal window and starts the download there.
+After `dao-modman nxm --install-handler`, clicking "Mod Manager Download" in the browser
+hands the link to the running dao-modman, which shows the download in a panel above the
+status line; several downloads can run side by side. If dao-modman is not running, the
+handler opens it in a new terminal window and starts the download there.
+`dao-modman nxm --uninstall-handler` unregisters it again. Do that before uninstalling
+dao-modman (`uv tool uninstall dao-modman`, `pipx uninstall dao-modman`): the registration
+names the Python of that install, and nxm:// links fail once it is gone. After reinstalling,
+or switching to another install, run `--install-handler` again.
 
-The running instance listens on a Unix socket in `$XDG_RUNTIME_DIR`, accessible only to your
-user. The handler is started by the browser, which rarely sees variables set in a shell, so
-the API token is best kept in `~/.config/dao-modman/.nexus-token`; `install-nxm-handler`
-says so if it is not there.
+On Linux the handler is a desktop file in `~/.local/share/applications`, made the default
+with `xdg-mime`. On Windows it is registered for your user only, in
+`HKEY_CURRENT_USER\Software\Classes\nxm`, and runs without a console window; problems show up
+in a message box. Only one program can handle `nxm://` links: registering dao-modman replaces
+Vortex or Mod Organizer (it says so), and unregistering does not bring them back, they
+register themselves again from their own settings. A handler that is not dao-modman's is
+never removed.
 
-Which terminal is opened: `terminal` in `config.toml` (a command, e.g. `terminal = "kitty"`
-or `"kitty --class dao-modman"`), else `$TERMINAL`, else `xdg-terminal-exec`, else KDE's
-configured terminal, else the first one found of konsole, gnome-terminal, kitty, alacritty,
-foot, wezterm, xterm.
+The running instance listens on a port on `localhost`; the port and a random token are in a
+file only your user can read, and the handler must present the token. The handler is started
+by the browser, which rarely sees variables set in a shell, so the API token is best kept in
+`~/.config/dao-modman/.nexus-token`; `--install-handler` says so if it is not there.
+
+Which terminal is opened on Linux: `terminal` in `config.toml` (a command, e.g.
+`terminal = "kitty"` or `"kitty --class dao-modman"`), else `$TERMINAL`, else
+`xdg-terminal-exec`, else KDE's configured terminal, else the first one found of konsole,
+gnome-terminal, kitty, alacritty, foot, wezterm, xterm. On Windows dao-modman gets a console
+of its own, which Windows 11 opens in your default terminal (Windows Terminal unless changed);
+`terminal` in `config.toml`, e.g. `terminal = "wt"`, is put in front of the command instead.
 
 ## Choosing a mod's files
 

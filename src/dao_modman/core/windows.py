@@ -1,24 +1,30 @@
-"""Windows only: where programs are installed, read from the registry.
+"""Windows only: the registry, known folders, the Python executables, message boxes.
 
-On other systems the lookups find nothing (None, an empty list), so callers need no checks.
+On other systems the lookups find nothing (None, an empty list) and the changes do nothing,
+so callers need no checks.
 """
 
 from __future__ import annotations
 
 import os
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
 APP_PATHS = r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths"
 
 
-def registry_value(subkey: str, name: str = "") -> str | None:
-    """A string value from HKEY_CURRENT_USER, else HKEY_LOCAL_MACHINE; "" is the default value."""
+def registry_value(subkey: str, name: str = "", *, machine: bool = True) -> str | None:
+    """A string value from HKEY_CURRENT_USER, else HKEY_LOCAL_MACHINE; "" is the default value.
+
+    `machine=False` reads HKEY_CURRENT_USER only.
+    """
     if os.name != "nt":
         return None
     import winreg
 
-    for root in (winreg.HKEY_CURRENT_USER, winreg.HKEY_LOCAL_MACHINE):
+    roots = [winreg.HKEY_CURRENT_USER] + ([winreg.HKEY_LOCAL_MACHINE] if machine else [])
+    for root in roots:
         try:
             with winreg.OpenKey(root, subkey) as key:
                 value, kind = winreg.QueryValueEx(key, name)
@@ -27,6 +33,66 @@ def registry_value(subkey: str, name: str = "") -> str | None:
         if kind in (winreg.REG_SZ, winreg.REG_EXPAND_SZ) and value:
             return os.path.expandvars(value) if kind == winreg.REG_EXPAND_SZ else value
     return None
+
+
+def set_user_registry(subkey: str, values: dict[str, str]) -> bool:
+    """Write string values ("" is the default value) to a key under HKEY_CURRENT_USER."""
+    if os.name != "nt":
+        return False
+    import winreg
+
+    with winreg.CreateKeyEx(winreg.HKEY_CURRENT_USER, subkey, 0, winreg.KEY_WRITE) as key:
+        for name, value in values.items():
+            winreg.SetValueEx(key, name, 0, winreg.REG_SZ, value)
+    return True
+
+
+def delete_user_registry(subkey: str) -> bool:
+    """Delete a key under HKEY_CURRENT_USER with everything below it; False if it is not there."""
+    if os.name != "nt":
+        return False
+    import winreg
+
+    def delete(path: str) -> None:
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, path, 0, winreg.KEY_ALL_ACCESS) as key:
+            while True:
+                try:
+                    child = winreg.EnumKey(key, 0)
+                except OSError:  # no subkeys left
+                    break
+                delete(rf"{path}\{child}")
+        winreg.DeleteKey(winreg.HKEY_CURRENT_USER, path)
+
+    try:
+        delete(subkey)
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def console_python() -> str:
+    """python.exe: runs with a console window, as the TUI needs."""
+    return _python("python.exe")
+
+
+def windowless_python() -> str:
+    """pythonw.exe: runs without a console window, for the nxm handler the browser starts."""
+    return _python("pythonw.exe")
+
+
+def _python(name: str) -> str:
+    sibling = Path(sys.executable).with_name(name)
+    return str(sibling) if os.name == "nt" and sibling.is_file() else sys.executable
+
+
+def message_box(title: str, text: str) -> None:
+    """Show a message where no console is, e.g. from the nxm handler; waits for OK."""
+    if os.name != "nt":
+        return
+    import ctypes
+
+    icon_error = 0x10  # MB_ICONERROR
+    ctypes.windll.user32.MessageBoxW(None, text, title, icon_error)  # type: ignore[attr-defined]
 
 
 def app_folder(exe: str) -> Path | None:

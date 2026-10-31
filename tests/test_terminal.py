@@ -55,3 +55,34 @@ def test_resolution_order(installed: set[str], monkeypatch: pytest.MonkeyPatch) 
     # a configured terminal that is not installed falls through to the next candidate
     assert terminal.resolve("ghostty") == ["foot"]
     assert terminal.resolve('broken "quote') == ["foot"]
+
+
+@pytest.fixture
+def started(monkeypatch: pytest.MonkeyPatch) -> list[tuple[list[str], dict]]:
+    calls: list[tuple[list[str], dict]] = []
+    monkeypatch.setattr(terminal.subprocess, "Popen", lambda argv, **kw: calls.append((argv, kw)))
+    return calls
+
+
+def test_open_window_on_linux(installed: set[str], started, monkeypatch) -> None:
+    monkeypatch.setattr(terminal, "WINDOWS", False)
+    installed.add("konsole")
+    terminal.open_window(None, ARGV)
+    argv, options = started[0]
+    assert argv == ["konsole", "-e", *ARGV]
+    assert options["start_new_session"] and options["stdin"] == terminal.subprocess.DEVNULL
+
+
+def test_open_window_on_windows(started, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(terminal, "WINDOWS", True)
+    terminal.open_window(None, ARGV)  # a console of its own: Windows picks the terminal
+    assert started[0] == (ARGV, {"creationflags": terminal.CREATE_NEW_CONSOLE})
+    terminal.open_window("wt -w new", ARGV)  # or the one from config.toml, around the command
+    assert started[1] == (["wt", "-w", "new", *ARGV], {})
+
+    def fail(argv: list[str], **_: object) -> None:
+        raise FileNotFoundError("not found")
+
+    monkeypatch.setattr(terminal.subprocess, "Popen", fail)
+    with pytest.raises(terminal.TerminalError, match="cannot start wt"):
+        terminal.open_window("wt", ARGV)

@@ -97,7 +97,8 @@ To run the mod manager in UI mode, use:
 Most functionality is also exposed via a command line interface:
 
     dao-modman nxm 'nxm://...'             # hand a "Mod Manager Download" link to the TUI
-    dao-modman install-nxm-handler         # register as nxm:// handler
+    dao-modman nxm --install-handler       # register as nxm:// handler
+    dao-modman nxm --uninstall-handler     # unregister again
     dao-modman laa status|restore|patch --exe PATH   # Large Address Aware patch
     dao-modman console status|enable|disable   # developer console
     dao-modman revisions init              # keep a git history of the library's metadata
