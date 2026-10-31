@@ -14,7 +14,7 @@ from dao_modman.core import metadata
 from dao_modman.core.library import Library, LibraryError, slugify
 from dao_modman.core.models import KIND_DAZIP, KIND_MIXED, KIND_OVERRIDE
 
-from .conftest import make_dazip, make_zip
+from .conftest import make_dazip, make_zip, symlink
 
 
 def test_hashes(tmp_path: Path) -> None:
@@ -258,8 +258,8 @@ def test_list_files_skips_links(tmp_path: Path) -> None:
     outside = tmp_path / "outside"
     outside.mkdir()
     (outside / "x.erf").write_text("x")
-    (root / "link.erf").symlink_to(root / "a.erf")
-    (root / "linked_dir").symlink_to(outside)
+    symlink(root / "link.erf", root / "a.erf")
+    symlink(root / "linked_dir", outside)
     assert archives.list_files(root) == ["a.erf", "b/Z.erf", "b/deep/c.erf"]
     assert archives.list_files(tmp_path / "missing") == []
 

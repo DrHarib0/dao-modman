@@ -144,6 +144,17 @@ def make_override(path: Path, name: str = "Bodies", *, config: bool = True) -> P
     return make_zip(path, files)
 
 
+def symlink(link: Path, target: Path) -> None:
+    """Create a symlink, or skip the test where the OS refuses.
+
+    Windows lets a normal user create symlinks only with Developer Mode on.
+    """
+    try:
+        link.symlink_to(target, target_is_directory=target.is_dir())
+    except OSError as exc:
+        pytest.skip(f"cannot create symlinks here: {exc}")
+
+
 @pytest.fixture
 def dirs(tmp_path: Path) -> Dirs:
     return Dirs(data=tmp_path / "data", downloads=tmp_path / "data" / "downloads")

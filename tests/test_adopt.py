@@ -9,6 +9,8 @@ from dao_modman.core import adopt, deploy
 from dao_modman.core.library import Library
 from dao_modman.core.models import KIND_DAZIP, KIND_OVERRIDE, KIND_PACKAGE
 
+from .conftest import symlink
+
 OVERRIDE = "packages/core/override"
 ADDINS_XML = """<?xml version="1.0" encoding="utf-8"?>
 <AddInsList>
@@ -44,7 +46,7 @@ def modded(tmp_path: Path, user_dir: Path) -> Path:
     write(user_dir / f"{OVERRIDE}/Better Hair/Thumbs.db", "junk")  # goes along with its folder
     write(user_dir / f"{OVERRIDE}/Junk/desktop.ini", "only ignored files here")
     target = write(tmp_path / "elsewhere.erf", "outside")
-    (user_dir / f"{OVERRIDE}/link.erf").symlink_to(target)
+    symlink(user_dir / f"{OVERRIDE}/link.erf", target)
     write(user_dir / "Settings/AddIns.xml", ADDINS_XML)
     return user_dir
 

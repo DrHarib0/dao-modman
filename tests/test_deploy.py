@@ -11,7 +11,7 @@ from dao_modman.core import deploy, report
 from dao_modman.core.library import Library
 from dao_modman.core.models import PathOp
 
-from .conftest import make_dazip, make_zip
+from .conftest import make_dazip, make_zip, symlink
 
 OVERRIDE = "packages/core/override"
 
@@ -451,7 +451,7 @@ def test_scan_and_clean_the_mod_directories(
     for rel, content in foreign_files.items():
         (user_dir / rel).parent.mkdir(parents=True, exist_ok=True)
         (user_dir / rel).write_text(content)
-    (user_dir / OVERRIDE / "link").symlink_to(outside, target_is_directory=True)
+    symlink(user_dir / OVERRIDE / "link", outside)
     (user_dir / OVERRIDE / "one/a.erf").write_text("edited")
 
     seen: list[tuple[str, int, int]] = []

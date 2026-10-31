@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -177,4 +178,6 @@ def test_install_nxm_handler_warns_about_unreachable_token(
     (config_dir / ".nexus-token").chmod(0o644)
     assert cli.main(["install-nxm-handler"]) == 0
     out = capsys.readouterr().out
-    assert "may not find" not in out and "can be read by other users" in out
+    assert "may not find" not in out
+    if os.name != "nt":  # chmod cannot make a file readable by others on Windows
+        assert "can be read by other users" in out

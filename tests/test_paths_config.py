@@ -82,7 +82,7 @@ def test_load_config_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) 
     config_dir = tmp_path / "cfg" / paths.APP_NAME
     config_dir.mkdir(parents=True)
     (config_dir / "config.toml").write_text(
-        f'game_user_dir = "{tmp_path}/game"\ndownloads_dir = "{tmp_path}/dl"\n'
+        f"game_user_dir = '{tmp_path}/game'\ndownloads_dir = '{tmp_path}/dl'\n"
     )
     cfg = config.load_config()
     assert cfg.game_user_dir == tmp_path / "game"
