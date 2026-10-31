@@ -57,6 +57,25 @@ def test_windows_lookups_find_nothing_elsewhere(monkeypatch: pytest.MonkeyPatch)
     if os.name == "nt":
         pytest.skip("only off Windows")
     assert paths.windows.documents_dir() is None and paths.windows.steam_folders() == []
+    monkeypatch.setenv("APPDATA", "/nonsense")  # set or not, it means nothing here
+    assert paths.windows.app_data() is None and paths.windows.local_app_data() is None
+
+
+def test_config_and_data_dirs_on_windows(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    monkeypatch.delenv("XDG_DATA_HOME", raising=False)
+    monkeypatch.setattr(paths.windows, "app_data", lambda: tmp_path / "Roaming")
+    monkeypatch.setattr(paths.windows, "local_app_data", lambda: tmp_path / "Local")
+    assert paths.config_dir() == tmp_path / "Roaming" / paths.APP_NAME
+    assert paths.data_dir() == tmp_path / "Local" / paths.APP_NAME
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path / "xdg"))  # still wins, as on Linux
+    assert paths.config_dir() == tmp_path / "xdg" / paths.APP_NAME
+
+
+@pytest.mark.skipif(os.name != "nt", reason="asks Windows")
+def test_windows_app_data_folders() -> None:
+    assert paths.windows.app_data() == Path(os.environ["APPDATA"])
+    assert paths.windows.local_app_data() == Path(os.environ["LOCALAPPDATA"])
 
 
 @pytest.mark.parametrize(

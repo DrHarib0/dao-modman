@@ -41,17 +41,20 @@ class Dirs:
             path.mkdir(parents=True, exist_ok=True)
 
 
-def _xdg(var: str, default: str) -> Path:
+def _xdg(var: str, default: str, on_windows: Path | None = None) -> Path:
+    """The XDG variable if set; else the Windows folder there is one, else `~/<default>`."""
     value = os.environ.get(var)
-    return Path(value) if value else Path.home() / default
+    return Path(value) if value else on_windows or Path.home() / default
 
 
 def data_dir() -> Path:
-    return _xdg("XDG_DATA_HOME", ".local/share") / APP_NAME
+    """`~/.local/share/dao-modman`; on Windows `%LOCALAPPDATA%\\dao-modman`."""
+    return _xdg("XDG_DATA_HOME", ".local/share", windows.local_app_data()) / APP_NAME
 
 
 def config_dir() -> Path:
-    return _xdg("XDG_CONFIG_HOME", ".config") / APP_NAME
+    """`~/.config/dao-modman`; on Windows `%APPDATA%\\dao-modman`."""
+    return _xdg("XDG_CONFIG_HOME", ".config", windows.app_data()) / APP_NAME
 
 
 def steam_roots() -> list[Path]:

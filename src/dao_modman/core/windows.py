@@ -45,6 +45,21 @@ def program_files() -> list[Path]:
     return list(dict.fromkeys(folders))
 
 
+def app_data() -> Path | None:
+    """%APPDATA%: settings that roam with the user, like config.toml and the token."""
+    return _env_folder("APPDATA")
+
+
+def local_app_data() -> Path | None:
+    """%LOCALAPPDATA%: large data that stays on this machine, like the mod library."""
+    return _env_folder("LOCALAPPDATA")
+
+
+def _env_folder(name: str) -> Path | None:
+    value = os.environ.get(name) if os.name == "nt" else None
+    return Path(value) if value else None
+
+
 def steam_folders() -> list[Path]:
     """Where Steam is installed: per user, machine-wide (as 32-bit program), the default."""
     folders = [

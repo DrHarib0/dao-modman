@@ -80,7 +80,7 @@ Then store your personal API key from nexusmods.com where dao-modman finds it:
 
 The token is read from the environment variable `NEXUS_API_TOKEN`, else from
 `~/.config/dao-modman/.nexus-token` (the token alone). dao-modman warns if other users can
-read that file.
+read that file. On Windows the file is `%APPDATA%\dao-modman\.nexus-token`.
 Go to [Account Settings/API Keys](https://www.nexusmods.com/settings/api-keys) to create a token. 
 Use your own key and never share it.
 

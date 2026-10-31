@@ -21,6 +21,10 @@ automatically; `game_user_dir` in `config.toml` overrides it.
       deployed.json         # what was written to the game dir (path + SHA-256)
     ~/.config/dao-modman/config.toml   # optional overrides, see below
 
+On Windows the data is in `%LOCALAPPDATA%\dao-modman\`, and `config.toml` and the API token
+are in `%APPDATA%\dao-modman\`; read `~/.config/dao-modman` in this document as the latter.
+`XDG_DATA_HOME` and `XDG_CONFIG_HOME` override these folders on every system.
+
 `config.toml` keys (all optional): `game_user_dir`, `game_install_dir`, `game_app_id`,
 `launch_command`, `unrar_command`, `data_dir`, `downloads_dir`, `terminal`, `ignore`,
 `language`, `max_texture_size`.
