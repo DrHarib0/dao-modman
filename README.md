@@ -2,7 +2,7 @@
 
 Terminal based mod manager for 
 [**Dragon Age: Origins**](https://store.steampowered.com/app/47810/Dragon_Age_Origins__Ultimate_Edition/) 
-on Steam/Proton (Linux), heavily inspired by [MO2](https://www.modorganizer.org/).
+on Linux (Steam/Proton) and Windows, heavily inspired by [MO2](https://www.modorganizer.org/).
 
 ![Screenshot of the TUI](https://raw.githubusercontent.com/DrHarib0/dao-modman/main/docs/img/ui-screenshot-1.png)
 
@@ -53,13 +53,18 @@ and mods have addressed those issues. Most of them were targeted for windows and
 
 ## Supported platforms
 
-Currently only the Steam release on Linux (Proton) has been tested. Steam installs are found
-automatically; for other installs on Linux, e.g. with Lutris or plain Wine, set the game's
-directories and launch command in `~/.config/dao-modman/config.toml`, see
+dao-modman runs on Linux and Windows; the Steam release has been tested on both (Proton on
+Linux). Steam installs are found automatically; for other installs on Linux, e.g. with Lutris
+or plain Wine, set the game's directories and launch command in
+`~/.config/dao-modman/config.toml`, see
 [other installs](https://github.com/DrHarib0/dao-modman/blob/main/docs/Readme.md#other-installs-lutris-wine).
 
-Windows and MacOSX are not officially supported yet. 
-Porting is not a big deal, but it needs testing: volunteers are welcome.
+On Windows, run dao-modman in Windows Terminal (the default on Windows 11). The game's user
+folder is found in your Documents folder for any install, and the config is in
+`%APPDATA%\dao-modman\config.toml`; for an install not from Steam, `game_install_dir` there is
+all it needs. `.rar` archives need WinRAR or 7-Zip installed.
+
+MacOS is not supported yet.
 
 ## Setup
 
@@ -154,7 +159,7 @@ Most of the code in this project was co-authored by claude. In-game testing was 
 
 ## Contributing
 
-Testers on other platforms are very welcome: Windows, and the GOG and EA releases of the game. If you
+Testers on other platforms are very welcome: MacOS, and the GOG and EA releases of the game. If you
 have such a setup and want to help, open an issue and say what you run.
 
 Pull requests are welcome too. Please run the tests and the linter (see below) before sending one.
