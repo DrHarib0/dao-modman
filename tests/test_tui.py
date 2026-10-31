@@ -151,11 +151,14 @@ async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_
         assert (user_dir / OVERRIDE / "mod/a.erf").is_file()
         assert not (user_dir / OVERRIDE / "mod/docs").exists()
 
+        assert rows(app)[0][-1] == ""  # applied: nothing to note
         await pilot.press("x")
         await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
         await pilot.press("y")
         await app.workers.wait_for_complete()
         assert not (user_dir / "packages").exists()
+        assert rows(app)[0][-1] == "not applied"
+        assert "Applied: no" in str(app.query_one("#status", Static).render())
 
     assert Library(dirs).mods["mod"].ops == [
         PathOp("exclude", f"{OVERRIDE}/mod/docs"),
@@ -751,7 +754,8 @@ async def test_conflicts_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path) -> N
 
         app.library.import_archive(make_zip(tmp_path / "Beta.zip", {"robe.dds": "b"}))
         app.refresh_table()
-        assert rows(app)[0][8] == "overwritten by Beta" and rows(app)[1][8] == "overwrites Alpha"
+        assert rows(app)[0][8] == "not applied, overwritten by Beta"
+        assert rows(app)[1][8] == "not applied, overwrites Alpha"
         await pilot.press("v")
         assert isinstance(app.screen, ConflictsScreen)
         tree = app.screen.query_one(Tree)
@@ -791,8 +795,8 @@ async def test_notes_show_who_overwrites_whom(tmp_path: Path, dirs: Dirs, user_d
     taken.parent.mkdir(parents=True)
     taken.write_text("by hand")
 
-    def notes(app: ModManApp) -> list[str]:
-        return [row[8] for row in rows(app)]
+    def notes(app: ModManApp) -> list[str]:  # nothing is applied here: leave that note out
+        return [row[8].removeprefix("not applied").removeprefix(", ") for row in rows(app)]
 
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
@@ -829,7 +833,7 @@ async def test_package_options_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
         assert [row[5] for row in rows(app)] == ["override", "package"]
-        assert [row[8] for row in rows(app)] == ["", "options"]
+        assert [row[8] for row in rows(app)] == ["not applied", "not applied, options"]
 
         await pilot.press("p")  # a mod without options
         assert not isinstance(app.screen, OptionsScreen)
@@ -863,7 +867,7 @@ async def test_package_options_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path
 
         await pilot.press("escape")
         await pilot.pause()
-        assert rows(app)[1][8] == "options (1 changed)"
+        assert rows(app)[1][8] == "not applied, options (1 changed)"
 
         # the path editor shows the deployed name together with the variant behind it
         await pilot.press("e")

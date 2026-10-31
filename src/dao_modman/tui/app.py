@@ -305,10 +305,9 @@ class ModManApp(App[None]):
             progress("Checking the game directories", 1, 1)
         try:
             result.plan = deploy.build_plan(self.library, result.foreign, progress)
-            if record := self._record():
-                progress("Comparing with the last apply", 0, 1)
-                result.states = deploy.compare(result.plan, record, result.foreign).mods
-                progress("Comparing with the last apply", 1, 1)
+            progress("Comparing with the last apply", 0, 1)
+            result.states = self._states(result.plan, result.foreign)
+            progress("Comparing with the last apply", 1, 1)
         except (pathops.PathOpError, OSError) as exc:
             result.errors.append(str(exc))
         return result
@@ -417,8 +416,7 @@ class ModManApp(App[None]):
                 plan = deploy.build_plan(self.library, self.foreign)
             overwrites = plan.overwrites()
             if states is None:
-                record = self._record()  # while nothing is applied, the status line says so
-                states = deploy.compare(plan, record, self.foreign).mods if record else {}
+                states = self._states(plan, self.foreign)
         except (pathops.PathOpError, OSError) as exc:
             overwrites, states = {}, {}
             self.notify(str(exc), severity="error", markup=False)
@@ -499,6 +497,13 @@ class ModManApp(App[None]):
                 f"Filter: {self.filter_text} ({shown} of {len(self.library.mods)})  |  {status}"
             )
         self.query_one("#status", Static).update(status)
+
+    def _states(self, plan: deploy.Plan, foreign: list[tuple[str, Path]] | None) -> dict[str, str]:
+        """Each mod's state against the last apply; with none, every enabled mod is not applied."""
+        if not self.config.dirs.deployed_file.exists():  # never applied, or unapplied
+            return deploy.compare(plan, None, foreign).mods
+        record = self._record()
+        return deploy.compare(plan, record, foreign).mods if record else {}  # unreadable record
 
     def _record(self) -> dict | None:
         """The last apply's record; None if nothing is applied or it cannot be read."""
