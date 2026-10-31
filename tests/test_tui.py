@@ -594,6 +594,7 @@ async def test_launch_game(tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypat
     from dao_modman.core import launch
 
     spawned: list[list[str]] = []
+    monkeypatch.setattr(launch, "WINDOWS", False)  # Windows: see test_launch_on_windows
     monkeypatch.setattr(launch.shutil, "which", lambda name: name if name == "steam" else None)
     monkeypatch.setattr(launch.subprocess, "Popen", lambda argv, **_: spawned.append(argv))
     Library(dirs).import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1"}))
@@ -618,6 +619,35 @@ async def test_launch_game(tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypat
         await pilot.press("l")
         assert len(spawned) == 3
         assert "launch_command" in [n.message for n in app._notifications][-1]
+
+
+def test_launch_on_windows(tmp_path: Path, monkeypatch) -> None:
+    from dao_modman.core import launch
+
+    spawned: list[tuple[list[str], object]] = []
+    opened: list[str] = []
+    monkeypatch.setattr(launch, "WINDOWS", True)
+    monkeypatch.setattr(launch, "_open_url", opened.append)
+    monkeypatch.setattr(
+        launch.subprocess, "Popen", lambda argv, cwd=None, **_: spawned.append((argv, cwd))
+    )
+    install_dir = tmp_path / "Dragon Age"
+
+    launch.launch("47810", None, install_dir)  # from Steam: through Steam
+    assert opened == ["steam://rungameid/47810"] and spawned == []
+
+    with pytest.raises(launch.LaunchError, match="not found"):
+        launch.launch(None, None, install_dir)
+    exe = install_dir / "bin_ship/DAOrigins.exe"
+    exe.parent.mkdir(parents=True)
+    exe.write_bytes(b"MZ")
+    launch.launch(None, None, install_dir)  # not from Steam: the exe itself, in its folder
+    assert spawned == [([str(exe)], exe.parent)]
+
+    launch.launch("47810", ["my-launcher"], install_dir)  # launch_command still comes first
+    assert spawned[-1] == (["my-launcher"], None)
+    with pytest.raises(launch.LaunchError, match="game_install_dir"):
+        launch.launch(None, None, None)
 
 
 def test_launch_command_and_app_id(tmp_path: Path, monkeypatch) -> None:

@@ -65,6 +65,11 @@ plain Wine prefix works the same way, e.g.
 `launch_command = ["env", "WINEPREFIX=/home/yourname/Games/dao", "wine", "C:\\GOG Games\\Dragon Age Origins\\bin_ship\\DAOrigins.exe"]`.
 Only the Steam release has been tested so far.
 
+On Windows the user dir is found for any install (see above), and `l` starts a game that is
+not from Steam by running `bin_ship\DAOrigins.exe` in `game_install_dir`, so that setting is
+all it needs, e.g. `game_install_dir = 'C:\GOG Games\Dragon Age Origins'`. A Steam game is
+started through Steam; `launch_command` overrides both.
+
 ## Nexus Mods
 
 Add a mod by URL or mod id (`n`), pick its files, and each is downloaded to `downloads/` and

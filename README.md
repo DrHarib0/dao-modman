@@ -131,7 +131,7 @@ The bar at the bottom shows the everyday keys; `?` lists all of them.
 | `v`              | conflicts of the selected mod            |
 | `L`              | items the mod adds, by in-game name      |
 | `a` / `x`        | apply / unapply                          |
-| `l`              | launch the game through Steam            |
+| `l`              | launch the game (through Steam)          |
 | `h`              | hide / show the game's official DLC      |
 | `/`              | filter by name or group (`esc` clears)   |
 | `t`              | tools (LAA, textures, all conflicts ...) |

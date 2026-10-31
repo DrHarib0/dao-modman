@@ -1073,9 +1073,10 @@ class ModManApp(App[None]):
         self.push_screen(KeysScreen(key_overview()))
 
     def action_launch(self) -> None:
-        """Start the game: with launch_command from config.toml, or through Steam."""
+        """Start the game: with launch_command from config.toml, through Steam, or its exe."""
+        config = self.config
         try:
-            launch.launch(self.config.game_app_id, self.config.launch_command)
+            launch.launch(config.game_app_id, config.launch_command, config.game_install_dir)
         except launch.LaunchError as exc:
             self.error(exc)
             return
