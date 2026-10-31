@@ -5,8 +5,10 @@ which on Steam/Proton is
 
     steamapps/compatdata/<17450|47810>/pfx/drive_c/users/steamuser/Documents/BioWare/Dragon Age/
 
-(17450 is the original release, 47810 the Ultimate Edition). It is found automatically;
-`game_user_dir` in `config.toml` overrides it.
+(17450 is the original release, 47810 the Ultimate Edition). On Windows it is
+`BioWare\Dragon Age` in the user's Documents folder, wherever that is (OneDrive may have moved
+it), and Steam's library folders are found through the registry. Either way the dir is found
+automatically; `game_user_dir` in `config.toml` overrides it.
 
 ## Data
 

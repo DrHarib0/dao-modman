@@ -45,6 +45,50 @@ def program_files() -> list[Path]:
     return list(dict.fromkeys(folders))
 
 
+def steam_folders() -> list[Path]:
+    """Where Steam is installed: per user, machine-wide (as 32-bit program), the default."""
+    folders = [
+        registry_value(r"Software\Valve\Steam", "SteamPath"),
+        registry_value(r"SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath"),
+        registry_value(r"SOFTWARE\Valve\Steam", "InstallPath"),
+    ]
+    paths = [Path(folder) for folder in folders if folder]
+    if os.name == "nt" and (x86 := os.environ.get("PROGRAMFILES(X86)")):
+        paths.append(Path(x86) / "Steam")
+    return paths
+
+
+# FOLDERID_Documents, see KNOWNFOLDERID in the Windows API documentation
+_DOCUMENTS = (0xFDD39AD0, 0x238F, 0x46AF, (0xAD, 0xB4, 0x6C, 0x85, 0x48, 0x03, 0x69, 0xC7))
+
+
+def documents_dir() -> Path | None:
+    """The user's Documents folder, wherever it is (OneDrive or the user may have moved it)."""
+    if os.name != "nt":
+        return None
+    import ctypes
+    from ctypes import wintypes
+
+    class GUID(ctypes.Structure):
+        _fields_ = [
+            ("Data1", wintypes.DWORD),
+            ("Data2", wintypes.WORD),
+            ("Data3", wintypes.WORD),
+            ("Data4", ctypes.c_ubyte * 8),
+        ]
+
+    data1, data2, data3, data4 = _DOCUMENTS
+    folder_id = GUID(data1, data2, data3, (ctypes.c_ubyte * 8)(*data4))
+    path = ctypes.c_wchar_p()
+    shell32, ole32 = ctypes.windll.shell32, ctypes.windll.ole32  # type: ignore[attr-defined]
+    try:
+        if shell32.SHGetKnownFolderPath(ctypes.byref(folder_id), 0, None, ctypes.byref(path)):
+            return None  # an error code: no such folder
+        return Path(path.value) if path.value else None
+    finally:
+        ole32.CoTaskMemFree(path)
+
+
 def find_program(exe: str, folders: Iterable[Path | str | None]) -> Path | None:
     """The first `<folder>/<exe>` that exists."""
     for folder in folders:

@@ -1,4 +1,4 @@
-"""XDG directories and Steam / Proton prefix discovery (Linux)."""
+"""XDG directories and Steam discovery: Proton prefixes on Linux, the registry on Windows."""
 
 from __future__ import annotations
 
@@ -7,10 +7,13 @@ import re
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from . import windows
+
 APP_NAME = "dao-modman"
 # Dragon Age: Origins, Dragon Age: Origins - Ultimate Edition
 STEAM_APP_IDS = ("17450", "47810")
-USER_DIR_IN_PREFIX = Path("pfx/drive_c/users/steamuser/Documents/BioWare/Dragon Age")
+USER_DIR_IN_DOCUMENTS = Path("BioWare/Dragon Age")
+USER_DIR_IN_PREFIX = Path("pfx/drive_c/users/steamuser/Documents") / USER_DIR_IN_DOCUMENTS
 
 _ACF_INSTALLDIR = re.compile(r'"installdir"\s+"((?:[^"\\]|\\.)*)"')
 _VDF_PATH = re.compile(r'"path"\s+"((?:[^"\\]|\\.)*)"')
@@ -59,6 +62,7 @@ def steam_roots() -> list[Path]:
         home / ".steam/root",
         home / ".var/app/com.valvesoftware.Steam/.local/share/Steam",
         home / ".var/app/com.valvesoftware.Steam/data/Steam",
+        *windows.steam_folders(),
     ]
     roots: list[Path] = []
     for candidate in candidates:
@@ -86,13 +90,20 @@ def steam_libraries(root: Path) -> list[Path]:
 
 
 def find_game_user_dir(roots: list[Path] | None = None) -> Path | None:
-    """The `Documents/BioWare/Dragon Age` dir inside the game's Proton prefix, if it exists."""
+    """The game's `Documents/BioWare/Dragon Age` dir, if it exists (the game creates it).
+
+    On Linux inside the game's Proton prefix; on Windows in the user's Documents folder,
+    whichever store the game came from. Given `roots`, only those Steam installs are searched.
+    """
     for root in steam_roots() if roots is None else roots:
         for library in steam_libraries(root):
             for app_id in STEAM_APP_IDS:
                 user_dir = library / "steamapps/compatdata" / app_id / USER_DIR_IN_PREFIX
                 if user_dir.is_dir():
                     return user_dir
+    documents = windows.documents_dir() if roots is None else None
+    if documents and (user_dir := documents / USER_DIR_IN_DOCUMENTS).is_dir():
+        return user_dir
     return None
 
 

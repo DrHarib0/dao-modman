@@ -24,6 +24,41 @@ def test_find_game_user_dir_missing(tmp_path: Path) -> None:
     assert paths.find_game_user_dir([tmp_path]) is None
 
 
+def test_steam_found_through_the_registry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(paths.Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "share"))
+    steam = tmp_path / "Steam"
+    monkeypatch.setattr(paths.windows, "steam_folders", lambda: [steam, tmp_path / "missing"])
+    assert paths.steam_roots() == []
+    steam.mkdir()
+    assert paths.steam_roots() == [steam.resolve()]
+
+
+def test_game_user_dir_in_windows_documents(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(paths, "steam_roots", lambda: [])
+    monkeypatch.setattr(paths.windows, "documents_dir", lambda: tmp_path / "OneDrive/Documents")
+    assert paths.find_game_user_dir() is None  # the game has not been started yet
+    user_dir = tmp_path / "OneDrive/Documents/BioWare/Dragon Age"
+    user_dir.mkdir(parents=True)
+    assert paths.find_game_user_dir() == user_dir
+    assert paths.find_game_user_dir([tmp_path]) is None  # given Steam roots only
+
+
+@pytest.mark.skipif(os.name != "nt", reason="asks Windows")
+def test_windows_lookups_do_not_fail() -> None:
+    documents = paths.windows.documents_dir()
+    assert documents is not None and documents.is_dir()
+    assert all(isinstance(folder, Path) for folder in paths.windows.steam_folders())
+
+
+def test_windows_lookups_find_nothing_elsewhere(monkeypatch: pytest.MonkeyPatch) -> None:
+    if os.name == "nt":
+        pytest.skip("only off Windows")
+    assert paths.windows.documents_dir() is None and paths.windows.steam_folders() == []
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [("a/b", "a/b"), ("/a//b/", "a/b"), ("a\\b", "a/b"), ("./a", "a")],
