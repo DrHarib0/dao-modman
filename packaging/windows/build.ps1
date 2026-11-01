@@ -26,7 +26,15 @@ Expand-Archive $zip -DestinationPath $work
 $source = Join-Path $work "pyapp-$PyAppVersion"
 
 # What the exe installs and how it runs it; see https://ofek.dev/pyapp/latest/config/
-$env:PYAPP_PROJECT_NAME = "dao-modman"   # no PYAPP_PROJECT_VERSION: always the newest
+# An unpinned requirement installs the newest dao-modman, and `self update` upgrades it to
+# the newest again. PyApp still wants a version: with a dependency file it is only a label,
+# the newest release at build time.
+$requirements = Join-Path $work "requirements.txt"
+Set-Content -Path $requirements -Value "dao-modman" -Encoding ascii
+$env:PYAPP_PROJECT_NAME = "dao-modman"
+$env:PYAPP_PROJECT_DEPENDENCY_FILE = $requirements
+$env:PYAPP_PROJECT_VERSION = (Invoke-RestMethod "https://pypi.org/pypi/dao-modman/json").info.version
+$env:PYAPP_EXEC_MODULE = "dao_modman"
 $env:PYAPP_PYTHON_VERSION = "3.14"
 $env:PYAPP_UV_ENABLED = "1"              # uv installs much faster than pip
 $env:PYAPP_PASS_LOCATION = "1"           # PYAPP=<exe path>: dao-modman offers updates with it
