@@ -33,7 +33,9 @@ from ..core import (
     paths,
     report,
     revisions,
+    terminal,
     textures,
+    updates,
 )
 from ..core.config import (
     TOKEN_VAR,
@@ -287,6 +289,7 @@ class ModManApp(App[None]):
                 markup=False,
             )
         self.started.set()
+        self.check_for_update()
         if self.nexus:
             self.load_account()
         await self.listen()
@@ -1207,9 +1210,13 @@ class ModManApp(App[None]):
             tools.append(("console_enable", "Enable the developer console"))
 
         tools.append(("chargen", "Check the character creator list (chargenmorphcfg.xml)"))
+        version = updates.installed()
+        tools.append(("update", f"Check for a new version of dao-modman (this is {version})"))
 
         def done(tool: str | None) -> None:
-            if tool == "chargen":
+            if tool == "update":
+                self.check_for_update(manual=True)
+            elif tool == "chargen":
                 self.show_chargen_report()
             elif tool == "texture_size":
                 self.choose_texture_size()
@@ -1223,6 +1230,48 @@ class ModManApp(App[None]):
                 self.run_tool(tool)
 
         self.push_screen(ChoiceScreen("Tools", tools), done)
+
+    @work(exclusive=True, group="updates")
+    async def check_for_update(self, manual: bool = False) -> None:
+        """Ask PyPI for a newer dao-modman. At start only a newer version is reported;
+        from the Tools menu every outcome is, and the update can be started right away."""
+        current = updates.installed()
+        if not updates.is_release(current):
+            if manual:
+                self.notify(f"dao-modman {current} runs from source: update it with git pull")
+            return
+        if manual:
+            self.notify("Asking PyPI for the newest version ...", timeout=3)
+        latest = await updates.latest()
+        if latest is None:
+            if manual:
+                self.error("PyPI did not answer: is there an internet connection?")
+            return
+        if not updates.newer(latest, current):
+            if manual:
+                self.notify(f"dao-modman {current} is the newest version")
+            return
+        available = f"dao-modman {latest} is available (this is {current})"
+        if not manual:
+            self.notify(f"{available}: t → Check for a new version", timeout=15)
+            return
+        install = updates.install_kind()
+        if install.command is None:
+            text = f"{available}.\n\nUpdate it with:\n\n    {install.how}\n"
+            self.push_screen(TextScreen("Update dao-modman", text))
+            return
+        question = (
+            f"{available}.\n\nUpdate now? dao-modman closes, and the update runs in a new "
+            f"window ({install.how}). Start dao-modman again when it is done."
+        )
+        if not await self.push_screen_wait(ConfirmScreen(question)):
+            return
+        try:
+            updates.start_update(install.command)
+        except (OSError, terminal.TerminalError) as exc:
+            self.error(f"Cannot start the update: {exc}")
+            return
+        self.exit()
 
     def refresh_foreign(self) -> None:
         """Look for files in the mod directories that dao-modman does not manage."""

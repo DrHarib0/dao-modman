@@ -260,7 +260,7 @@ async def test_tools_menu_laa_patch_and_restore(
     app.open_url = lambda url, **_: opened.append(url)
     async with app.run_test(size=(140, 40)) as pilot:
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 7
+        assert app.screen.query_one(OptionList).option_count == 8
         await pilot.press("enter")  # first entry: apply the patch
         await pilot.pause()
         assert opened == [laa.GUIDE_URL]
@@ -276,7 +276,7 @@ async def test_tools_menu_laa_patch_and_restore(
         assert laa.is_laa(exe)
 
         await pilot.press("t")
-        assert app.screen.query_one(OptionList).option_count == 6  # the patch entry is gone
+        assert app.screen.query_one(OptionList).option_count == 7  # the patch entry is gone
         await pilot.press("enter")
         await pilot.pause()
         assert not laa.is_laa(exe)
@@ -354,7 +354,8 @@ async def test_tools_menu_enable_console(tmp_path: Path, dirs: Dirs, user_dir: P
     app.open_url = lambda url, **_: opened.append(url)
 
     async def run_last_tool(pilot) -> None:
-        await pilot.press("t", "end", "up", "enter")  # the console entry, above the report
+        # the console entry, above the report and the update check
+        await pilot.press("t", "end", "up", "up", "enter")
         await pilot.pause()
 
     async with app.run_test(size=(140, 40)) as pilot:
@@ -1067,7 +1068,7 @@ async def test_tools_menu_shows_the_character_creator_report(
     )
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
-        await pilot.press("t", "end", "enter")  # the report is the last tool
+        await pilot.press("t", "end", "up", "enter")  # the report, above the update check
         await until(pilot, lambda: isinstance(app.screen, TextScreen))
         text = app.screen.text
         assert "#1 Hairs" in text and "hairs: hm_har_x_0" in text
@@ -1289,6 +1290,72 @@ def choose_tool(app: ModManApp, tool: str) -> None:
     """Highlight a tools menu entry by its id."""
     ids = [key for key, _label in app.screen.choices]
     app.screen.query_one(OptionList).highlighted = ids.index(tool)
+
+
+@pytest.fixture
+def pypi(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """PyPI's newest version and this installation, as the tests set them."""
+    from dao_modman.core import updates
+
+    state: dict = {"latest": "0.5.0", "installed": "0.5.0", "started": []}
+
+    async def newest(transport: object = None) -> str | None:
+        return state["latest"]
+
+    monkeypatch.setattr(updates, "latest", newest)
+    monkeypatch.setattr(updates, "installed", lambda: state["installed"])
+    command = ["uv", "tool", "upgrade", "dao-modman"]
+    monkeypatch.setattr(updates, "install_kind", lambda: updates.Install(updates.UV_TOOL, command))
+    monkeypatch.setattr(updates, "start_update", state["started"].append)
+    return state
+
+
+def messages(app: ModManApp) -> list[str]:
+    return [n.message for n in app._notifications]
+
+
+async def test_tools_menu_checks_for_a_new_version(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, pypi: dict
+) -> None:
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        assert not any("is available" in m for m in messages(app))  # up to date: silent
+
+        await pilot.press("t")
+        choose_tool(app, "update")
+        await pilot.press("enter")
+        await until(pilot, lambda: "dao-modman 0.5.0 is the newest version" in messages(app))
+
+        pypi["latest"] = "0.6.0"
+        await pilot.press("t")
+        choose_tool(app, "update")
+        await pilot.press("enter")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        assert "dao-modman 0.6.0 is available (this is 0.5.0)" in app.screen.message
+        assert "uv tool upgrade dao-modman" in app.screen.message
+        await pilot.press("y")  # update: dao-modman quits, the update runs after it
+        await until(pilot, lambda: pypi["started"] != [])
+    assert pypi["started"] == [["uv", "tool", "upgrade", "dao-modman"]]
+
+
+async def test_new_version_is_reported_at_start(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, pypi: dict
+) -> None:
+    pypi["latest"] = "0.6.0"
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await until(pilot, lambda: any("0.6.0 is available" in m for m in messages(app)))
+
+    pypi["installed"] = "0.5.1.dev2+g1234567"  # running from source: not checked at start
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await app.workers.wait_for_complete()
+        assert not any("is available" in m for m in messages(app))
+        await pilot.press("t")
+        choose_tool(app, "update")
+        await pilot.press("enter")
+        await until(pilot, lambda: any("runs from source" in m for m in messages(app)))
 
 
 async def test_adopt_files_installed_by_hand(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:

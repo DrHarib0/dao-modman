@@ -76,6 +76,15 @@ Alternatively clone this repo and run the application with uv:
 
     uv run dao-modman
 
+On Windows without Python or uv, download `dao-modman-windows.zip` from the
+[latest release](https://github.com/DrHarib0/dao-modman/releases/latest) and start
+`dao-modman.exe`: on its first start it installs Python and the newest dao-modman into a
+folder of its own (see the `README.txt` in the zip).
+
+dao-modman says at start when a newer version is out; Tools (`t`) → "Check for a new version"
+updates it (or run `uv tool upgrade dao-modman`, `pipx upgrade dao-modman`,
+`dao-modman.exe self update`).
+
 On the first start a setup wizard finds the game's folders (or asks for them), takes your
 personal API key from nexusmods.com, offers to register dao-modman for "Mod Manager Download"
 links and checks the game's setup (LAA patch, console, a program for `.rar` archives). The
@@ -180,3 +189,9 @@ else → patch; an explicit version can be given), tags the tested commit, creat
 release with the changes since the last one as notes, written by [git-cliff](https://git-cliff.org),
 and publishes the package to PyPI. There is no changelog file in the repository; `uvx git-cliff`
 prints the full changelog from the history.
+
+Last, the release gets `dao-modman-windows.zip`: `dao-modman.exe`, built with
+[PyApp](https://ofek.dev/pyapp/) by `packaging/windows/build.ps1` (needs Rust), and its
+`README.txt`. The exe installs the newest dao-modman from PyPI on its first start, so it is not
+tied to a release. `gh workflow run windows-exe.yml --ref <branch>` builds it on its own, as a
+workflow artifact.

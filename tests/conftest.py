@@ -5,8 +5,20 @@ from pathlib import Path
 
 import pytest
 
+from dao_modman.core import updates
 from dao_modman.core.library import Library
 from dao_modman.core.paths import Dirs
+
+
+@pytest.fixture(autouse=True)
+def no_update_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The TUI asks PyPI for a newer version at start; tests never go online."""
+
+    async def offline(transport: object = None) -> None:
+        return None
+
+    monkeypatch.setattr(updates, "latest", offline)
+
 
 MANIFEST = """<?xml version="1.0" encoding="utf-8"?>
 <Manifest Type="AddIn">

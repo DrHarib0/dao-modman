@@ -49,6 +49,22 @@ forward slashes: in double quotes TOML reads `\` as the start of an escape seque
 `game_user_dir = 'C:\Users\yourname\Documents\BioWare\Dragon Age'`. The settings screen writes
 them that way.
 
+## Updates
+
+At start, dao-modman asks PyPI in the background for the newest release and says so when it is
+newer than the running one (offline, it says nothing). "Check for a new version" in the Tools
+menu (`t`) asks again and, if there is one, offers to update: dao-modman closes and the update
+runs in a new window, since the running program holds its own files. How depends on how it was
+installed: `uv tool upgrade dao-modman`, `pipx upgrade dao-modman`, or for the Windows download
+`dao-modman.exe self update`; for any other installation it shows the `pip` command. A copy run
+from the source tree (a version like `0.5.1.dev2+g1234567`) is never checked: update it with
+`git pull`.
+
+The Windows download (`dao-modman-windows.zip` in each release) is a small launcher made with
+[PyApp](https://ofek.dev/pyapp/): on its first start it fetches a standalone Python and installs
+the newest dao-modman from PyPI into a folder of its own, which `dao-modman.exe self remove`
+deletes again. The library and the settings are not in that folder and stay.
+
 ## Rar archives
 
 No Python library reads `.rar`, so an external program extracts them: `unrar`, `7z` or

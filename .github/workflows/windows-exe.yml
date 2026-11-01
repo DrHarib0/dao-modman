@@ -1,0 +1,39 @@
+# dao-modman.exe for Windows (PyApp), zipped with packaging/windows/README.txt.
+# Run by the release workflow, which attaches the zip to the release; by hand
+# (gh workflow run windows-exe.yml --ref <branch>) it is only kept as an artifact.
+name: Windows exe
+
+on:
+  workflow_dispatch:
+  workflow_call:
+    inputs:
+      tag:
+        description: "Release to attach the zip to"
+        type: string
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest # Rust comes with the runner image
+    permissions:
+      contents: write # attach the zip to the release
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build dao-modman.exe
+        shell: pwsh
+        run: ./packaging/windows/build.ps1
+      - uses: actions/upload-artifact@v7
+        with:
+          name: dao-modman-windows
+          path: dist/dao-modman-windows.zip
+      - name: Attach it to the release
+        if: inputs.tag != ''
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: gh release upload "$env:TAG" dist/dao-modman-windows.zip --clobber
