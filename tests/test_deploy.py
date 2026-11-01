@@ -234,6 +234,24 @@ def test_chargenmorphcfg_is_merged(tmp_path: Path, library: Library, user_dir: P
     assert tree(user_dir) == []
 
 
+def test_mods_without_files_of_their_own(tmp_path: Path, library: Library) -> None:
+    library.import_archive(make_zip(tmp_path / "fix.zip", {"fix.dlg": "fixed"}))
+    library.import_archive(make_zip(tmp_path / "again.zip", {"fix.dlg": "fixed"}))
+    library.import_archive(make_zip(tmp_path / "lost.zip", {"t.gda": "1"}))
+    library.import_archive(make_zip(tmp_path / "wins.zip", {"t.gda": "2"}))
+    library.import_archive(
+        make_zip(tmp_path / "hair.zip", {"chargenmorphcfg.xml": chargen_xml(["h"], [])})
+    )
+    library.import_archive(
+        make_zip(tmp_path / "colors.zip", {"chargenmorphcfg.xml": chargen_xml([], ["c"])})
+    )
+    library.import_archive(make_zip(tmp_path / "text.zip", {"readme.txt": "only text"}))
+
+    plan = deploy.build_plan(library)
+    assert plan.no_effect == ["fix", "lost", "text"]  # merged files count as an effect
+    assert plan.same_files == {"fix": {"again"}}
+
+
 def test_single_chargenmorphcfg_is_deployed_as_is(tmp_path: Path, library: Library) -> None:
     library.import_archive(make_zip(tmp_path / "hair.zip", {"chargenmorphcfg.xml": "<oops"}))
     plan = deploy.build_plan(library)

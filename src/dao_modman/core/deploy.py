@@ -97,6 +97,10 @@ class Plan:
     merged: dict[str, list[str]] = field(default_factory=dict)
     warnings: list[str] = field(default_factory=list)
     addins: list[AddIn] = field(default_factory=list)
+    # enabled mods that add nothing to the game: no file of theirs is deployed or merged
+    no_effect: list[str] = field(default_factory=list)
+    # mod id -> later mods whose identical copies of its files are deployed instead
+    same_files: dict[str, set[str]] = field(default_factory=dict)
 
     def overwrites(self) -> dict[str, tuple[set[str], set[str]]]:
         """Per mod in a conflict: `(mods it overwrites, mods that overwrite it)`.
@@ -198,6 +202,7 @@ def build_plan(
     candidates: dict[tuple[str, ...], list[PlannedFile]] = {}
     chargens: dict[str, list[PlannedFile]] = {}
     enabled = [(entry, mod) for entry, mod in library.ordered() if entry.enabled]
+    with_addins: set[str] = set()
     for index, (_entry, mod) in enumerate(enabled):
         if progress:
             progress("Building the plan", index + 1, len(enabled))
@@ -214,7 +219,10 @@ def build_plan(
             else:
                 key = (scope[0].casefold(), scope[1].casefold())
             candidates.setdefault(key, []).append(planned)
-        plan.addins += library.addins(mod, targets)
+        mod_addins = library.addins(mod, targets)
+        plan.addins += mod_addins
+        if mod_addins:
+            with_addins.add(mod.id)
     for rel, path in foreign or []:
         planned = PlannedFile(normalize_rel(rel), path, UNMANAGED)
         scope = _override_scope(planned.target)
@@ -226,8 +234,13 @@ def build_plan(
         # Only the last mod's files are deployed; duplicates inside one mod are its business.
         winner = [item for item in items if item.mod_id != UNMANAGED][-1]
         plan.files += [item for item in items if item.mod_id == winner.mod_id]
-        if len(_mod_ids(items)) > 1 and not _identical(items):
-            plan.conflicts.append(_conflict(items))
+        if len(_mod_ids(items)) > 1:
+            if not _identical(items):
+                plan.conflicts.append(_conflict(items))
+                continue
+            for mod_id in _mod_ids(items):
+                if mod_id not in (winner.mod_id, UNMANAGED):
+                    plan.same_files.setdefault(mod_id, set()).add(winner.mod_id)
 
     for items in chargens.values():
         mod_ids = _mod_ids(items)
@@ -249,6 +262,9 @@ def build_plan(
         plan.files.append(PlannedFile(target, items[-1].source, MERGED, content))
         plan.merged[target] = mod_ids
 
+    used = {planned.mod_id for planned in plan.files} | with_addins
+    used.update(mod_id for mod_ids in plan.merged.values() for mod_id in mod_ids)
+    plan.no_effect = [mod.id for _entry, mod in enabled if mod.id not in used]
     plan.files.sort(key=lambda planned: planned.target.casefold())
     plan.conflicts.sort(key=lambda conflict: conflict.name.casefold())
     return plan

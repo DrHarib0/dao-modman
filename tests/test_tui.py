@@ -802,19 +802,46 @@ async def test_notes_show_who_overwrites_whom(tmp_path: Path, dirs: Dirs, user_d
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
         assert notes(app) == [
-            "overwritten by 2 mods",
+            "no effect, overwritten by 2 mods",
             "overwrites Alpha",
             "overwrites Alpha",
             "overwritten by unmanaged files",
         ]
         await pilot.press("J")  # Alpha after Beta: now it wins against Beta
         assert notes(app)[:3] == [
-            "overwritten by Alpha",
+            "no effect, overwritten by Alpha",
             "overwrites Beta, overwritten by Gamma",
             "overwrites Alpha",
         ]
         await pilot.press("space")  # a disabled mod overwrites nothing
         assert notes(app)[:3] == ["", "", ""]
+
+
+async def test_notes_show_mods_without_files_of_their_own(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    from .test_deploy import chargen_xml
+
+    library = Library(dirs)
+    library.import_archive(make_zip(tmp_path / "Fix.zip", {"fix.dlg": "fixed"}))
+    library.import_archive(make_zip(tmp_path / "Fix again.zip", {"fix.dlg": "fixed"}))
+    library.import_archive(
+        make_zip(tmp_path / "Hair.zip", {"chargenmorphcfg.xml": chargen_xml(["h"], [])})
+    )
+    library.import_archive(
+        make_zip(tmp_path / "Colors.zip", {"chargenmorphcfg.xml": chargen_xml(["h"], ["c"])})
+    )
+    library.import_archive(make_zip(tmp_path / "Readme.zip", {"readme.txt": "only text"}))
+
+    app = make_app(tmp_path, dirs, user_dir)
+    async with app.run_test(size=(140, 40)):
+        assert [row[8] for row in rows(app)] == [
+            "no effect: same files as Fix again",
+            "not applied",
+            "merged",
+            "merged",
+            "no effect",
+        ]
 
 
 async def test_package_options_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path) -> None:

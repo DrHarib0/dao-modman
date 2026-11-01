@@ -474,18 +474,31 @@ class ModManApp(App[None]):
         changed = sum(not key.is_default(mod.options) for key in keys)
         return f"options ({changed} changed)" if changed else "options"
 
+    def _mods_named(self, ids: set[str]) -> str:
+        """A single mod by name, several counted."""
+        if len(ids) == 1:
+            (mod_id,) = ids
+            return self.library.mods[mod_id].name
+        return f"{len(ids)} mods"
+
+    def _effect_notes(self, plan: deploy.Plan) -> dict[str, str]:
+        """Notes for enabled mods that deploy no file of their own."""
+        notes = {}
+        for mod_id in plan.no_effect:
+            same = plan.same_files.get(mod_id)
+            notes[mod_id] = f"no effect: same files as {self._mods_named(same)}" if same else ""
+            notes[mod_id] = notes[mod_id] or "no effect"
+        own = {planned.mod_id for planned in plan.files}
+        for mod_ids in plan.merged.values():
+            notes.update((mod_id, "merged") for mod_id in mod_ids if mod_id not in own)
+        return notes
+
     def _overwrite_notes(self, beats: set[str], beaten_by: set[str]) -> list[str]:
         """Which mods this one overwrites files of, and which overwrite its files.
 
         A single mod is named, several are counted.
         """
-
-        def mods(ids: set[str]) -> str:
-            if len(ids) == 1:
-                (mod_id,) = ids
-                return self.library.mods[mod_id].name
-            return f"{len(ids)} mods"
-
+        mods = self._mods_named
         notes = [f"overwrites {mods(beats)}"] if beats else []
         if deploy.UNMANAGED in beaten_by:
             notes.append("overwritten by unmanaged files")
@@ -508,10 +521,11 @@ class ModManApp(App[None]):
             if plan is None:
                 plan = deploy.build_plan(self.library, self.foreign)
             overwrites = plan.overwrites()
+            effect = self._effect_notes(plan)
             if states is None:
                 states = self._states(plan, self.foreign)
         except (pathops.PathOpError, OSError) as exc:
-            overwrites, states = {}, {}
+            overwrites, states, effect = {}, {}, {}
             self.notify(str(exc), severity="error", markup=False)
         self._pending = sum(state != deploy.APPLIED for state in states.values())
         ordered = self.library.ordered()
@@ -533,6 +547,7 @@ class ModManApp(App[None]):
             self._row_ids.append(mod.id)
             state = states.get(mod.id, deploy.APPLIED)
             notes = [state] if state != deploy.APPLIED else []
+            notes += [note] if (note := effect.get(mod.id)) else []
             notes += self._overwrite_notes(*overwrites.get(mod.id, (set(), set())))
             notes += ["update"] if mod.id in self.updates else []
             notes += [note] if (note := self._options_note(mod)) else []
