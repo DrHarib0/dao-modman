@@ -1,0 +1,22 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <title>dao-modman</title>
+  <!-- the logo's shield and prompt alone, for small sizes: app icon, exe, .desktop -->
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a3262a"/>
+      <stop offset="1" stop-color="#5e1215"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f1d27a"/>
+      <stop offset="1" stop-color="#b8892b"/>
+    </linearGradient>
+  </defs>
+  <path d="M128 6 L238 44 L238 144 C238 210 190 236 128 252 C66 236 18 210 18 144 L18 44 Z"
+        fill="url(#gold)"/>
+  <path d="M128 24 L222 56 L222 144 C222 200 182 222 128 236 C74 222 34 200 34 144 L34 56 Z"
+        fill="url(#shield)"/>
+  <g fill="none" stroke="#e8bf5a" stroke-width="22" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M76 92 L124 132 L76 172"/>
+    <path d="M140 180 L184 180"/>
+  </g>
+</svg>

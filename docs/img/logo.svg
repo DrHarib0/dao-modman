@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <title>dao-modman</title>
+  <defs>
+    <linearGradient id="shield" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#a3262a"/>
+      <stop offset="1" stop-color="#5e1215"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#f1d27a"/>
+      <stop offset="1" stop-color="#b8892b"/>
+    </linearGradient>
+    <linearGradient id="wing" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#3a3f4b"/>
+      <stop offset="1" stop-color="#22262e"/>
+    </linearGradient>
+    <linearGradient id="steel" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#f2f4f8"/>
+      <stop offset="0.5" stop-color="#c3c9d4"/>
+      <stop offset="1" stop-color="#8b94a3"/>
+    </linearGradient>
+    <linearGradient id="wood" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#9a6a3c"/>
+      <stop offset="1" stop-color="#5a3b20"/>
+    </linearGradient>
+    <radialGradient id="crystal" cx="0.4" cy="0.35" r="0.65">
+      <stop offset="0" stop-color="#e6f6ff"/>
+      <stop offset="0.45" stop-color="#6fc3ff"/>
+      <stop offset="1" stop-color="#1f5fa8"/>
+    </radialGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.5" r="0.5">
+      <stop offset="0" stop-color="#6fc3ff" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#6fc3ff" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+
+  <!-- background -->
+  <rect width="512" height="512" rx="96" fill="#14161b"/>
+
+  <!-- wings, the right one mirrored -->
+  <g id="wing-left" fill="url(#wing)" stroke="#b8892b" stroke-width="4" stroke-linejoin="round">
+    <path d="M150 190
+             C110 150 74 112 54 70
+             C70 118 66 150 44 178
+             C76 168 98 176 108 196
+             C78 206 58 232 52 268
+             C80 244 108 240 130 252
+             C112 272 104 300 108 330
+             C122 300 138 284 150 280 Z"/>
+  </g>
+  <use href="#wing-left" transform="translate(512 0) scale(-1 1)"/>
+
+  <!-- longsword and mage staff, crossed behind the shield (drawn upright, then turned) -->
+  <g transform="translate(256 263) rotate(-42)">
+    <!-- staff: tip at the top left -->
+    <rect x="-7" y="-196" width="14" height="420" rx="7" fill="url(#wood)"
+          stroke="#2e1d0e" stroke-width="2"/>
+    <rect x="-10" y="-176" width="20" height="10" rx="3" fill="url(#gold)"/>
+    <rect x="-10" y="196" width="20" height="10" rx="3" fill="url(#gold)"/>
+    <circle cx="0" cy="-222" r="44" fill="url(#glow)"/>
+    <path d="M-16 -194 C-30 -210 -26 -236 -10 -248 M16 -194 C30 -210 26 -236 10 -248"
+          fill="none" stroke="url(#gold)" stroke-width="7" stroke-linecap="round"/>
+    <circle cx="0" cy="-222" r="20" fill="url(#crystal)" stroke="#123a66" stroke-width="2"/>
+  </g>
+  <g transform="translate(256 263) rotate(42)">
+    <!-- longsword: point at the top right, hilt at the bottom left -->
+    <path d="M-11 150 L-11 -200 L0 -234 L11 -200 L11 150 Z"
+          fill="url(#steel)" stroke="#4d5462" stroke-width="2.5" stroke-linejoin="round"/>
+    <path d="M0 -224 L0 140" stroke="#8b94a3" stroke-width="2"/>
+    <rect x="-48" y="148" width="96" height="14" rx="7" fill="url(#gold)"
+          stroke="#7a5a18" stroke-width="2"/>
+    <rect x="-7" y="162" width="14" height="50" rx="4" fill="#3b2a1f"
+          stroke="#1c130c" stroke-width="2"/>
+    <circle cx="0" cy="222" r="13" fill="url(#gold)" stroke="#7a5a18" stroke-width="2"/>
+  </g>
+
+  <!-- shield -->
+  <path d="M256 92 L380 136 L380 262 C380 348 322 402 256 434 C190 402 132 348 132 262 L132 136 Z"
+        fill="url(#gold)"/>
+  <path d="M256 110 L364 148 L364 262 C364 336 314 384 256 414 C198 384 148 336 148 262 L148 148 Z"
+        fill="url(#shield)"/>
+
+  <!-- the terminal prompt -->
+  <g fill="none" stroke="#e8bf5a" stroke-width="26" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M196 216 L250 262 L196 308"/>
+    <path d="M266 318 L322 318"/>
+  </g>
+</svg>
