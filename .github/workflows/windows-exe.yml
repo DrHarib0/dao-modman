@@ -1,9 +1,14 @@
 # dao-modman.exe for Windows (PyApp), zipped with packaging/windows/README.txt.
-# Run by the release workflow, which attaches the zip to the release; by hand
-# (gh workflow run windows-exe.yml --ref <branch>) it is only kept as an artifact.
+# Run by the release workflow, which attaches the zip to the release; on a push that changes
+# the build, or by hand (gh workflow run windows-exe.yml --ref <branch>), it is only kept as
+# an artifact.
 name: Windows exe
 
 on:
+  push:
+    paths:
+      - "packaging/windows/**"
+      - ".github/workflows/windows-exe.yml"
   workflow_dispatch:
   workflow_call:
     inputs:
