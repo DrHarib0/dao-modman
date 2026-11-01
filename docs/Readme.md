@@ -147,7 +147,7 @@ by the browser, which rarely sees variables set in a shell, so the API token is 
 Which terminal is opened on Linux: `terminal` in `config.toml` (a command, e.g.
 `terminal = "kitty"` or `"kitty --class dao-modman"`), else `$TERMINAL`, else
 `xdg-terminal-exec`, else KDE's configured terminal, else the first one found of konsole,
-gnome-terminal, kitty, alacritty, foot, wezterm, xterm. On Windows dao-modman gets a console
+alacritty, xterm, kitty, foot, gnome-terminal, ptyxis, wezterm. On Windows dao-modman gets a console
 of its own, which Windows 11 opens in your default terminal (Windows Terminal unless changed);
 `terminal` in `config.toml`, e.g. `terminal = "wt"`, is put in front of the command instead.
 

@@ -25,7 +25,8 @@ SEPARATORS: dict[str, list[str]] = {
     "ptyxis": ["--"],
     "wezterm": ["start", "--"],
 }
-KNOWN = ("konsole", "gnome-terminal", "kitty", "alacritty", "foot", "wezterm", "xterm")
+# Tried in this order when nothing else names a terminal: those that take `-e`, then the rest.
+KNOWN = ("konsole", "alacritty", "xterm", *SEPARATORS)
 
 
 class TerminalError(Exception):
