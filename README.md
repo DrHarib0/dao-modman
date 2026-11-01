@@ -37,6 +37,7 @@ and mods have addressed those issues. Most of them were targeted for windows and
 - `chargenmorphcfg.xml` merging: runs automatically if you add/remove a mod containing character morphs
 - Nexus Integration: Download mods from [nexusmods](https://www.nexusmods.com/games/dragonage)
 - Archive formats: `.dazip`, `.override`, `.zip`, `.7z` and `.rar`, also nested
+- Fast apply: only what changed is written, and files are cloned (Linux: btrfs, XFS) or hard-linked (Windows) instead of copied where the filesystem allows, so applying takes no extra disk space
 - Conflict Detection: see which mod overwrites which, and decide by load order or by leaving single files out
 - Mix and Match: pick which files of a mod you want, in the UI; the directory structure is taken care of. 
   This selection persists if you disable a mod and reenable it later.

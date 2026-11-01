@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 
@@ -406,9 +407,9 @@ def test_progress_and_folder_casing(tmp_path: Path, library: Library, user_dir: 
     deploy.apply(deploy.build_plan(library), user_dir, deployed, lambda *step: seen.append(step))
     # both mods end up in one folder although it did not exist before either was copied
     assert tree(user_dir) == ["extra/Shared/one.erf", "extra/Shared/two.erf"]
-    assert [step for step in seen if step[0] == "Copying files"] == [
-        ("Copying files", 1, 2),
-        ("Copying files", 2, 2),
+    assert [step for step in seen if step[0] == "Writing files"] == [
+        ("Writing files", 1, 2),
+        ("Writing files", 2, 2),
     ]
     assert ("Comparing with the last apply", 2, 2) in seen
 
@@ -663,3 +664,135 @@ def test_record_without_signatures_is_checked_once(
     upgraded = deploy.load_record(deployed)["files"]
     assert all("source" in item and "size" in item for item in upgraded)
     assert deploy.apply(deploy.build_plan(library), user_dir, deployed).unchanged == 2
+
+
+@pytest.fixture
+def hard_links(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Apply with hard links, as on Windows (Linux supports them as well)."""
+    monkeypatch.setattr(deploy, "_LINK", deploy.HARDLINK)
+    monkeypatch.setattr(deploy, "_unlinkable", set())
+
+
+def test_hard_links(tmp_path: Path, library: Library, user_dir: Path, hard_links: None) -> None:
+    deployed = library.dirs.deployed_file
+    mod = library.import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a", "b.erf": "b"}))
+    source = library.files_dir(mod.id) / "a.erf"
+
+    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert (result.written, result.linked) == (2, 2)
+    applied = user_dir / OVERRIDE / "mod/a.erf"
+    assert applied.samefile(source)
+    item = next(i for i in deploy.load_record(deployed)["files"] if i["path"].endswith("a.erf"))
+    assert (item["link"], item["linked"]) == ("hard", str(source))
+
+    again = deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert (again.written, again.unchanged) == (0, 2)
+    assert deploy.unapply(deployed).removed == 2
+    assert not applied.exists() and source.read_text() == "a"  # only the link is gone
+
+
+def test_changed_hard_link_reports_the_library_copy(
+    tmp_path: Path, library: Library, user_dir: Path, hard_links: None
+) -> None:
+    deployed = library.dirs.deployed_file
+    mod = library.import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a", "b.erf": "b"}))
+    deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    edited, replaced = user_dir / OVERRIDE / "mod/a.erf", user_dir / OVERRIDE / "mod/b.erf"
+    edited.write_text("edited in place")  # changes the library's copy too
+    replaced.unlink()
+    replaced.write_text("replaced")  # a new file: the library's copy is untouched
+
+    result = deploy.apply(deploy.build_plan(library), user_dir, deployed)
+    assert sorted(result.kept) == [f"{OVERRIDE}/mod/a.erf", f"{OVERRIDE}/mod/b.erf"]
+    assert result.library_changed == {mod.id: [f"{OVERRIDE}/mod/a.erf"]}
+    assert (library.files_dir(mod.id) / "a.erf").read_text() == "edited in place"
+    assert (library.files_dir(mod.id) / "b.erf").read_text() == "b"
+
+
+def test_unapply_reports_changed_library_copies(
+    tmp_path: Path, library: Library, user_dir: Path, hard_links: None
+) -> None:
+    mod = library.import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a"}))
+    deploy.apply(deploy.build_plan(library), user_dir, library.dirs.deployed_file)
+    (user_dir / OVERRIDE / "mod/a.erf").write_text("edited")
+    result = deploy.unapply(library.dirs.deployed_file)
+    assert result.library_changed == {mod.id: [f"{OVERRIDE}/mod/a.erf"]}
+
+
+def test_hard_link_failure_falls_back_to_copying(
+    tmp_path: Path,
+    library: Library,
+    user_dir: Path,
+    hard_links: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = []
+
+    def no_links(source: Path, dest: Path) -> None:
+        calls.append(dest)
+        raise OSError(18, "Invalid cross-device link")
+
+    monkeypatch.setattr(deploy.os, "link", no_links)
+    mod = library.import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a", "b.erf": "b"}))
+    result = deploy.apply(deploy.build_plan(library), user_dir, library.dirs.deployed_file)
+    assert (result.written, result.linked) == (2, 0)
+    assert len(calls) == 1  # not tried again for the same drives
+    applied = user_dir / OVERRIDE / "mod/a.erf"
+    assert applied.read_text() == "a"
+    assert not applied.samefile(library.files_dir(mod.id) / "a.erf")
+    assert "link" not in deploy.load_record(library.dirs.deployed_file)["files"][0]
+
+
+def test_clone_failure_falls_back_to_copying(
+    tmp_path: Path, library: Library, user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls = []
+
+    def no_clones(src: object, out: object) -> None:
+        calls.append(out)
+        raise OSError(95, "Operation not supported")
+
+    monkeypatch.setattr(deploy, "_LINK", deploy.REFLINK)
+    monkeypatch.setattr(deploy, "_unlinkable", set())
+    monkeypatch.setattr(deploy, "_clone", no_clones)
+    library.import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a" * 5000, "b.erf": "b"}))
+    result = deploy.apply(deploy.build_plan(library), user_dir, library.dirs.deployed_file)
+    assert (result.written, result.linked) == (2, 0)
+    assert len(calls) == 1
+    assert (user_dir / OVERRIDE / "mod/a.erf").read_text() == "a" * 5000
+    assert deploy.unapply(library.dirs.deployed_file).removed == 2  # hashes match the copies
+
+
+def test_real_clone(tmp_path: Path, library: Library, user_dir: Path) -> None:
+    """Clones where the filesystem can (btrfs, XFS ...); pytest's tmp often cannot."""
+    if not sys.platform.startswith("linux"):
+        pytest.skip("reflinks are used on Linux")
+    probe, copy = tmp_path / "probe", tmp_path / "probe-copy"
+    probe.write_bytes(b"x" * 4096)
+    with probe.open("rb") as src, copy.open("xb") as out:
+        try:
+            deploy._clone(src, out)
+        except OSError:
+            pytest.skip(f"{tmp_path} cannot clone files")
+    library.import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a" * 9000}))
+    result = deploy.apply(deploy.build_plan(library), user_dir, library.dirs.deployed_file)
+    assert result.linked == 1
+    applied = user_dir / OVERRIDE / "mod/a.erf"
+    applied.write_text("changed")  # a clone is independent of the library's copy
+    assert next(library.dirs.mods.glob("mod/files/a.erf")).read_text() == "a" * 9000
+
+
+def test_generated_and_reduced_files_are_never_linked(
+    tmp_path: Path, library: Library, user_dir: Path, hard_links: None
+) -> None:
+    one = {"chargenmorphcfg.xml": chargen_xml(["base", "hair_a"], ["black"]), "a.mmh": "a"}
+    library.import_archive(make_zip(tmp_path / "one.zip", one))
+    two = {"chargenmorphcfg.xml": chargen_xml(["base", "hair_b"], ["pink"])}
+    library.import_archive(make_zip(tmp_path / "two.zip", two))
+    plan = deploy.build_plan(library)
+    assert plan.merged
+    result = deploy.apply(plan, user_dir, library.dirs.deployed_file)
+    assert (result.written, result.linked) == (2, 1)  # a.mmh linked, the merged file written
+    merged = next(i for i in deploy.load_record(library.dirs.deployed_file)["files"]
+                  if i["path"].endswith("chargenmorphcfg.xml"))  # fmt: skip
+    assert "link" not in merged

@@ -330,7 +330,13 @@ class Library:
         return mod
 
     def replace_archive(
-        self, mod: Mod, archive: Path, *, version: str = "", nexus: NexusInfo | None = None
+        self,
+        mod: Mod,
+        archive: Path,
+        *,
+        version: str = "",
+        nexus: NexusInfo | None = None,
+        action: str | None = None,
     ) -> Mod:
         """Swap a mod's files for a new archive, keeping its id, load order and path ops."""
         archive = self._store(archive)
@@ -343,12 +349,34 @@ class Library:
             current.rename(stage / "old")
             files.rename(current)
             self._listings.pop(mod.id, None)
-            self.save_mod(mod, f"{mod.id}: replace archive with {archive.name}")
+            self.save_mod(mod, action or f"{mod.id}: replace archive with {archive.name}")
         except (archives.ArchiveError, dazip.DazipError) as exc:
             raise LibraryError(str(exc)) from exc
         finally:
             shutil.rmtree(stage, ignore_errors=True)
         return mod
+
+    def restore(self, mod: Mod) -> Mod:
+        """Extract a mod's files again from its archive in `downloads/`.
+
+        For library files changed through a hard link in the game: the restored files are
+        new ones, so the changed copy in the game is no longer tied to the library.
+        """
+        if mod.archive is None:
+            raise LibraryError(f"{mod.name}: it was not added from an archive")
+        archive = self.dirs.downloads / Path(mod.archive.file).name
+        again = "; download it again from Nexus" if mod.nexus else ""
+        if not archive.is_file():
+            raise LibraryError(f"{mod.name}: {archive.name} is no longer in downloads{again}")
+        if archives.sha256_file(archive) != mod.archive.sha256:
+            raise LibraryError(f"{mod.name}: {archive.name} has changed since it was added{again}")
+        return self.replace_archive(
+            mod,
+            archive,
+            version=mod.version,
+            nexus=mod.nexus,
+            action=f"{mod.id}: restore from {archive.name}",
+        )
 
     def remove(self, mod_id: str, *, delete_archive: bool = False) -> None:
         mod = self.mods.pop(mod_id)

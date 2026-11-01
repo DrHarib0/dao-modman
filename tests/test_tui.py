@@ -909,7 +909,7 @@ async def test_apply_runs_behind_a_progress_dialog(
     release, real_apply = threading.Event(), deploy.apply
 
     def slow_apply(plan, user_dir, deployed_file, progress):
-        progress("Copying files", 1, 2)
+        progress("Writing files", 1, 2)
         release.wait(5)  # hold the operation so the test can look at the dialog
         return real_apply(plan, user_dir, deployed_file, progress)
 
@@ -923,7 +923,7 @@ async def test_apply_runs_behind_a_progress_dialog(
                 break
         assert isinstance(app.screen, ProgressScreen)
         await pilot.pause(0.1)
-        assert str(app.screen.query_one("#work-detail", Static).render()) == "Copying files: 1 / 2"
+        assert str(app.screen.query_one("#work-detail", Static).render()) == "Writing files: 1 / 2"
 
         # nothing gets through while it runs: not quit, not another apply, not a toggle
         await pilot.press("q", "space", "a", "escape")
@@ -1794,3 +1794,58 @@ async def test_startup_warns_about_a_token_file_others_can_read(
     async with app.run_test(size=(140, 40)):
         await app.started.wait()
         assert warning in [n.message for n in app._notifications]
+
+
+async def test_changed_hard_link_offers_restore(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(deploy, "_LINK", deploy.HARDLINK)
+    monkeypatch.setattr(deploy, "_unlinkable", set())
+    Library(dirs).import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1", "b.erf": "2"}))
+    library_copy = dirs.mods / "one/files/a.erf"
+    applied = user_dir / OVERRIDE / "one/a.erf"
+
+    def asking(text: str) -> bool:
+        return isinstance(app.screen, ConfirmScreen) and text in app.screen.message
+
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("a", "y")
+        await app.workers.wait_for_complete()
+        assert applied.samefile(library_copy)
+        assert "(2 linked)" in [n.message for n in app._notifications][-1]
+
+        applied.write_text("edited in the game")  # through the link: the library copy too
+        await pilot.press("a", "y")
+        await until(pilot, lambda: asking("hard links to the"))
+        assert f"{OVERRIDE}/one/a.erf" in app.screen.message
+        await pilot.press("y")  # restore from the archive
+        await until(pilot, lambda: asking("back into the game"))
+        assert library_copy.read_text() == "1"
+        assert applied.read_text() == "edited in the game"
+        await pilot.press("y")  # put the original back
+        await until(pilot, lambda: asking("Apply to"))
+        assert not applied.exists()
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        assert applied.read_text() == "1" and applied.samefile(library_copy)
+
+
+async def test_restore_without_the_archive_is_reported(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(deploy, "_LINK", deploy.HARDLINK)
+    monkeypatch.setattr(deploy, "_unlinkable", set())
+    Library(dirs).import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "1"}))
+    app = ModManApp(Config(dirs=dirs, game_user_dir=user_dir))
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("a", "y")
+        await app.workers.wait_for_complete()
+        (user_dir / OVERRIDE / "one/a.erf").write_text("edited")
+        (dirs.downloads / "one.zip").unlink()
+        await pilot.press("a", "y")
+        await until(pilot, lambda: isinstance(app.screen, ConfirmScreen))
+        await pilot.press("y")
+        await app.workers.wait_for_complete()
+        assert any("no longer in downloads" in n.message for n in app._notifications)
+        assert not isinstance(app.screen, ConfirmScreen)  # nothing restored: no second question

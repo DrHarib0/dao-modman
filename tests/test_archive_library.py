@@ -14,7 +14,7 @@ import pytest
 from dao_modman.core import archive as archives
 from dao_modman.core import metadata
 from dao_modman.core.library import Library, LibraryError, slugify
-from dao_modman.core.models import KIND_DAZIP, KIND_MIXED, KIND_OVERRIDE
+from dao_modman.core.models import KIND_DAZIP, KIND_MIXED, KIND_OVERRIDE, PathOp
 
 from .conftest import make_dazip, make_zip, symlink
 
@@ -361,3 +361,29 @@ def test_listing_follows_the_library(tmp_path: Path, library: Library) -> None:
     library.remove(mod.id)
     again = library.import_archive(make_zip(tmp_path / "one.zip", {"a.erf": "a"}))
     assert again.id == mod.id and library.list_files(again.id) == ["a.erf"]
+
+
+def test_restore_from_the_archive(tmp_path: Path, library: Library) -> None:
+    mod = library.import_archive(make_zip(tmp_path / "mod.zip", {"a.erf": "a", "b.erf": "b"}))
+    mod.ops = [PathOp("exclude", "packages/core/override/mod/b.erf")]
+    library.save_mod(mod)
+    original = library.files_dir(mod.id) / "a.erf"
+    applied = tmp_path / "applied.erf"
+    os.link(original, applied)  # as apply does on Windows
+    applied.write_text("changed in the game")
+    assert original.read_text() == "changed in the game"
+
+    restored = library.restore(mod)
+    assert original.read_text() == "a"
+    assert applied.read_text() == "changed in the game"  # no longer tied to the library
+    assert not applied.samefile(original)
+    assert restored.id == mod.id and restored.ops == mod.ops
+    assert library.profile.entry(mod.id) is not None
+
+    archive = library.dirs.downloads / "mod.zip"
+    archive.write_bytes(b"something else")
+    with pytest.raises(LibraryError, match="has changed since it was added"):
+        library.restore(mod)
+    archive.unlink()
+    with pytest.raises(LibraryError, match="no longer in downloads"):
+        library.restore(mod)

@@ -6,11 +6,12 @@ import contextlib
 import hashlib
 import json
 import os
+import sys
 import xml.etree.ElementTree as ET
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, BinaryIO
 
 from . import addins, chargen
 from .archive import sha256_file
@@ -120,6 +121,9 @@ class ApplyResult:
     skipped: list[str] = field(default_factory=list)  # already existed, left alone
     kept: list[str] = field(default_factory=list)  # applied by us, changed since: left alone
     addins: list[str] = field(default_factory=list)  # registered by this run
+    linked: int = 0  # of the written files, cloned or hard-linked instead of copied
+    # mod id -> kept files that are hard links: their library copies were changed with them
+    library_changed: dict[str, list[str]] = field(default_factory=dict)
     unregistered: list[str] = field(default_factory=list)  # of disabled mods
 
 
@@ -128,6 +132,7 @@ class UnapplyResult:
     removed: int = 0
     kept: list[str] = field(default_factory=list)  # modified since deployment
     addins: list[str] = field(default_factory=list)
+    library_changed: dict[str, list[str]] = field(default_factory=dict)  # as in ApplyResult
 
 
 def _override_scope(target: str) -> tuple[str, str] | None:
@@ -278,14 +283,91 @@ def _chunks(planned: PlannedFile) -> Iterator[bytes]:
             yield chunk
 
 
-def _write_hashed(planned: PlannedFile, dest: Path) -> str:
+def _copy_into(planned: PlannedFile, out: BinaryIO) -> str:
     digest = hashlib.sha256()
+    for chunk in _chunks(planned):
+        digest.update(chunk)
+        out.write(chunk)
+    return digest.hexdigest()
+
+
+def _write_hashed(planned: PlannedFile, dest: Path) -> str:
     # "xb": never overwrite a file that appeared in the meantime
     with dest.open("xb") as out:
-        for chunk in _chunks(planned):
-            digest.update(chunk)
-            out.write(chunk)
-    return digest.hexdigest()
+        return _copy_into(planned, out)
+
+
+# How library files reach the game: cloned on Linux (copy-on-write, e.g. btrfs or XFS: no
+# extra space, and the copy stays independent), hard-linked on Windows (NTFS, same drive).
+# Whatever cannot be linked is copied.
+REFLINK = "reflink"
+HARDLINK = "hard"
+_LINK: str | None = (
+    HARDLINK if os.name == "nt" else REFLINK if sys.platform.startswith("linux") else None
+)
+_unlinkable: set[tuple[int, int]] = set()  # (source device, target device) where linking failed
+
+
+def _source_sha256(source: Path) -> str:
+    """The SHA-256 of a linked library file: read once, unlike the copy it replaces."""
+    stat = source.stat()
+    key = (source, stat.st_size, stat.st_mtime_ns)
+    if key not in _hashes:
+        with source.open("rb") as fh:  # SHA-256 only: sha256_file also computes an MD5
+            _hashes[key] = hashlib.file_digest(fh, "sha256").hexdigest()
+    return _hashes[key]
+
+
+def _clone(src: BinaryIO, out: BinaryIO) -> None:
+    import fcntl  # Linux only, like REFLINK
+
+    fcntl.ioctl(out.fileno(), fcntl.FICLONE, src.fileno())
+
+
+def _place(planned: PlannedFile, dest: Path) -> tuple[str, str | None]:
+    """Write a planned file into the game; returns its SHA-256 and how it was linked.
+
+    Generated files and reduced textures are always written; a library file is cloned or
+    hard-linked where the filesystem allows it, else copied (None). Like a copy, neither
+    replaces a file that appeared in the meantime.
+    """
+    if _LINK is None or planned.content is not None or planned.reduction is not None:
+        return _write_hashed(planned, dest), None
+    devices = (planned.source.stat().st_dev, dest.parent.stat().st_dev)
+    if devices in _unlinkable:
+        return _write_hashed(planned, dest), None
+    if _LINK == HARDLINK:
+        try:
+            os.link(planned.source, dest)
+        except FileExistsError:
+            raise
+        except OSError:  # another drive, a filesystem without hard links
+            _unlinkable.add(devices)
+            return _write_hashed(planned, dest), None
+        return _source_sha256(planned.source), HARDLINK
+    with planned.source.open("rb") as src, dest.open("xb") as out:
+        try:
+            _clone(src, out)
+        except OSError:  # no copy-on-write here, or another filesystem
+            _unlinkable.add(devices)
+            return _copy_into(planned, out), None
+    return _source_sha256(planned.source), REFLINK
+
+
+def _library_changed(item: dict, path: Path) -> bool:
+    """Whether a changed file of ours is still hard-linked: its library copy changed too."""
+    if item.get("link") != HARDLINK or not item.get("linked"):
+        return False
+    try:
+        return os.path.samefile(path, item["linked"])
+    except OSError:
+        return False
+
+
+def _note_changed(result: ApplyResult | UnapplyResult, item: dict, path: Path) -> None:
+    result.kept.append(item["path"])
+    if _library_changed(item, path):
+        result.library_changed.setdefault(item.get("mod", ""), []).append(item["path"])
 
 
 def _output_sha256(planned: PlannedFile) -> str:
@@ -450,7 +532,7 @@ def apply(
         elif item is not None:
             state = _on_disk(item, dest)
             if state == "modified":
-                result.kept.append(item["path"])
+                _note_changed(result, item, dest)
             elif state == "same" and _unchanged(item, planned):
                 if "size" not in item:  # recorded before sizes were
                     item.update(_stat(dest))
@@ -471,7 +553,7 @@ def apply(
         if state == "same":
             removals[dest] = item
         elif state == "modified":
-            result.kept.append(item["path"])
+            _note_changed(result, item, dest)
 
     addins_xml = resolve_case(user_dir, addins.ADDINS_REL)
     wanted = {addin.uid.casefold() for addin in plan.addins}
@@ -504,12 +586,16 @@ def apply(
         for index, (dest, planned) in enumerate(writes.items()):
             dest.parent.mkdir(parents=True, exist_ok=True)
             entry = new_files[dest]
-            entry["sha256"] = _write_hashed(planned, dest)
+            entry["sha256"], how = _place(planned, dest)
+            if how:
+                result.linked += 1
+            if how == HARDLINK:  # changes to it change the library copy: see _library_changed
+                entry.update(link=HARDLINK, linked=str(planned.source))
             entry.update(_stat(dest), source=planned.signature())
             entry["reduced"] = _reduced(planned)
             del entry["new"]
             if progress:
-                progress("Copying files", index + 1, len(writes))
+                progress("Writing files", index + 1, len(writes))
         if new_addins:
             addins_xml.parent.mkdir(parents=True, exist_ok=True)
             addins.register(addins_xml, plan.addins)
@@ -608,7 +694,7 @@ def unapply(deployed_file: Path, progress: Progress | None = None) -> UnapplyRes
                 path.unlink()
                 result.removed += 1
             else:
-                result.kept.append(item["path"])
+                _note_changed(result, item, path)
         if progress:
             progress("Removing applied files", index + 1, len(items))
     for rel in sorted(record.get("dirs", []), key=lambda d: d.count("/"), reverse=True):

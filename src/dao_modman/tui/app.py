@@ -1062,8 +1062,9 @@ class ModManApp(App[None]):
         finally:
             self.refresh_status()
         revisions.snapshot(self.config.dirs.data, f"apply: {result.written} files")
+        linked = f" ({result.linked} linked)" if result.linked else ""
         message = (
-            f"Applied: wrote {result.written} file(s), removed {result.removed},"
+            f"Applied: wrote {result.written} file(s){linked}, removed {result.removed},"
             f" {result.unchanged} unchanged"
         )
         if result.kept:
@@ -1085,6 +1086,59 @@ class ModManApp(App[None]):
                 self.notify(text, markup=False)
         if warning := reduced.warning():
             self.notify(warning, severity="warning", timeout=10, markup=False)
+        if result.library_changed:
+            await self.offer_restore(result.library_changed, reapply=True)
+
+    async def offer_restore(self, changed: dict[str, list[str]], *, reapply: bool) -> None:
+        """Offer to restore library files that were changed through a hard link in the game.
+
+        With `reapply`, also offer to put the originals back into the game.
+        """
+        mods = [self.library.mods[mod_id] for mod_id in changed if mod_id in self.library.mods]
+        if not mods:
+            return
+        paths = [path for mod in mods for path in changed[mod.id]]
+        lines = [
+            "These applied files were changed outside dao-modman. They are hard links to the",
+            "library, so the library's copies changed with them:",
+            "",
+            *[f"  {path}" for path in paths[:4]],
+        ]
+        if len(paths) > 4:
+            lines.append(f"  … and {len(paths) - 4} more")
+        names = ", ".join(mod.name for mod in mods)
+        lines += ["", f"Restore {names} from the downloaded archive?"]
+        if not await self.push_screen_wait(ConfirmScreen("\n".join(lines))):
+            return
+        restored: list[Mod] = []
+        for mod in mods:
+            try:
+                await self.run_with_progress(
+                    f"Restoring {mod.name}", lambda _progress, mod=mod: self.library.restore(mod)
+                )
+            except (LibraryError, OSError) as exc:
+                self.error(exc)
+                continue
+            restored.append(mod)
+        self.refresh_table()
+        if not restored:
+            return
+        message = f"Restored {', '.join(mod.name for mod in restored)} from the archive"
+        user_dir = self.config.game_user_dir
+        reset = [path for mod in restored for path in changed[mod.id]]
+        question = (
+            f"Also put the original {len(reset)} file(s) back into the game?"
+            "\n\nYour changes to them are lost."
+        )
+        if not (reapply and user_dir and await self.push_screen_wait(ConfirmScreen(question))):
+            self.notify(message)
+            return
+        for rel in reset:
+            path = user_dir / rel
+            if path.is_file() and not path.is_symlink():
+                path.unlink()
+        self.notify(message)
+        self.action_apply()  # puts the originals in, after the usual confirmation
 
     def action_unapply(self) -> None:
         self.start_unapply()
@@ -1165,6 +1219,8 @@ class ModManApp(App[None]):
         elif result.kept:
             message += f", kept {len(result.kept)} modified file(s)"
         self.notify(message)
+        if result.library_changed:
+            await self.offer_restore(result.library_changed, reapply=False)
 
     def action_keys(self) -> None:
         """Show every key; the footer only lists the everyday ones."""

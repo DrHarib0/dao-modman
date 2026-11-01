@@ -260,6 +260,18 @@ are not on it.
   since is left alone and no longer counts as dao-modman's. The apply dialog and the result
   say how many files are written, removed and unchanged. A record from a version before
   this is checked by content on the first apply, which reads every applied file once.
+- **Files are linked instead of copied where possible.** On Linux they are cloned when the
+  library and the game are on the same filesystem with copy-on-write support (btrfs, XFS,
+  bcachefs …): applying is quick and takes no extra space, and the game's copy is still a
+  file of its own. On Windows they are hard links when both are on the same drive (NTFS).
+  Anything else is copied, as are merged files and textures reduced to the size limit; the
+  result says how many files were linked.
+- **A hard-linked file is the library's file too.** A tool that edits an applied file in
+  place on Windows changes the library's copy with it. Apply and unapply notice this and
+  offer to restore the mod from its archive in `downloads/` (if it is still there and
+  unchanged); after that, apply can also put the original back into the game, which
+  discards the changes made to it. A tool that replaces the file instead leaves the library
+  alone, like any file changed by hand.
 - Once something is applied, the Notes column says what apply would do for a mod: **not
   applied**, **changed** (its files differ from what is applied) or **still applied** (it is
   disabled, but its files are in the game); the status line counts these mods.
