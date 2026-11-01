@@ -185,12 +185,16 @@ later commits as a pre-release of the next one (e.g. `0.1.1.dev4+g7a7a715`).
 Releases are started by hand: Actions → Release → Run workflow, or `gh workflow run publish.yml`.
 The workflow runs the tests, derives the next version from the [conventional
 commits](https://www.conventionalcommits.org) since the last release (`feat:` → minor, anything
-else → patch; an explicit version can be given), tags the tested commit, creates the GitHub
-release with the changes since the last one as notes, written by [git-cliff](https://git-cliff.org),
-and publishes the package to PyPI. There is no changelog file in the repository; `uvx git-cliff`
-prints the full changelog from the history.
+else → patch; an explicit version can be given), builds the package and the Windows zip as that
+version, then tags the tested commit and creates the GitHub release with the changes since the
+last one as notes, written by [git-cliff](https://git-cliff.org), and the zip attached, and last
+publishes the package to PyPI. GitHub releases are immutable here, so everything a release
+carries is built before it is created; the version goes into the builds by
+`SETUPTOOLS_SCM_PRETEND_VERSION` and `PYAPP_PROJECT_VERSION`, as the tag does not exist yet. A
+failed build leaves neither tag nor release behind. There is no changelog file in the
+repository; `uvx git-cliff` prints the full changelog from the history.
 
-Last, the release gets `dao-modman-windows.zip`: `dao-modman.exe`, built with
+The Windows zip, `dao-modman-windows.zip`, holds `dao-modman.exe`, built with
 [PyApp](https://ofek.dev/pyapp/) by `packaging/windows/build.ps1` (needs Rust), and its
 `README.txt`. The exe installs the newest dao-modman from PyPI on its first start, so it is not
 tied to a release. `gh workflow run windows-exe.yml --ref <branch>` builds it on its own, as a

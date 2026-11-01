@@ -1,7 +1,7 @@
-# dao-modman.exe for Windows (PyApp), zipped with packaging/windows/README.txt.
-# Run by the release workflow, which attaches the zip to the release; on a push that changes
-# the build, or by hand (gh workflow run windows-exe.yml --ref <branch>), it is only kept as
-# an artifact.
+# dao-modman.exe for Windows (PyApp), zipped with packaging/windows/README.txt, kept as the
+# artifact `dao-modman-windows`. The release workflow calls it with the version it is about to
+# tag and puts the zip on the release; it also runs on a push that changes the build, and by
+# hand (gh workflow run windows-exe.yml --ref <branch>), labelled from the git tags.
 name: Windows exe
 
 on:
@@ -12,8 +12,8 @@ on:
   workflow_dispatch:
   workflow_call:
     inputs:
-      tag:
-        description: "Release to attach the zip to"
+      version:
+        description: "Version of the coming release, e.g. 0.6.1 (empty: from the git tags)"
         type: string
         required: false
         default: ""
@@ -24,24 +24,16 @@ permissions:
 jobs:
   build:
     runs-on: windows-latest # Rust comes with the runner image
-    permissions:
-      contents: write # attach the zip to the release
     steps:
       - uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.tag || github.ref }}
-          fetch-depth: 0 # the version comes from the git tags
+          fetch-depth: 0 # without a given version, it comes from the git tags
       - name: Build dao-modman.exe
         shell: pwsh
+        env:
+          PYAPP_PROJECT_VERSION: ${{ inputs.version }}
         run: ./packaging/windows/build.ps1
       - uses: actions/upload-artifact@v7
         with:
           name: dao-modman-windows
           path: dist/dao-modman-windows.zip
-      - name: Attach it to the release
-        if: inputs.tag != ''
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
-        run: gh release upload "$env:TAG" dist/dao-modman-windows.zip --clobber

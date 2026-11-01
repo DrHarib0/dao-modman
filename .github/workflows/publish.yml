@@ -1,7 +1,12 @@
 # Started by hand (Actions → Release → Run workflow, or `gh workflow run publish.yml`):
-# tests, the next version from the conventional commits (git-cliff), a tag on the tested
-# commit, a GitHub release with that version's changelog as notes, then the package on PyPI
-# and dao-modman.exe for Windows attached to the release.
+# tests, the next version from the conventional commits (git-cliff), the package and
+# dao-modman.exe for Windows built as that version, then the tag on the tested commit and a
+# GitHub release with that version's changelog as notes and the Windows zip, then the package
+# on PyPI.
+#
+# Releases are immutable once published, so everything they carry is built first, with the
+# version passed in instead of read from a tag that does not exist yet. A failed build leaves
+# neither tag nor release behind, and the release can simply be started again.
 name: Release
 
 on:
@@ -26,14 +31,13 @@ jobs:
   ci:
     uses: ./.github/workflows/ci.yml
 
-  release:
+  version:
     needs: ci
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    permissions:
-      contents: write # push the tag, create the GitHub release
     outputs:
       tag: ${{ steps.version.outputs.tag }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -56,40 +60,58 @@ jobs:
           fi
           echo "Releasing $tag"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
-      - name: Tag the tested commit
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$TAG" -m "$TAG"
-          git push origin "$TAG"
-      - name: Create the GitHub release
-        env:
-          TAG: ${{ steps.version.outputs.tag }}
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          uvx "$GIT_CLIFF" --latest --strip header > notes.md
-          gh release create "$TAG" --title "${TAG#v}" --notes-file notes.md --verify-tag
+          echo "version=${tag#v}" >> "$GITHUB_OUTPUT"
 
   build:
-    needs: release
+    needs: version
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ needs.release.outputs.tag }}
-          fetch-depth: 0 # hatch-vcs reads the version from the tag
       - name: Install uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       - run: uv build
+        env:
+          SETUPTOOLS_SCM_PRETEND_VERSION: ${{ needs.version.outputs.version }} # no tag yet
       - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
 
+  windows-exe:
+    needs: version
+    uses: ./.github/workflows/windows-exe.yml
+    with:
+      version: ${{ needs.version.outputs.version }}
+
+  github-release:
+    needs: [version, build, windows-exe]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the tag, create the GitHub release
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # git-cliff writes the notes from the history
+      - name: Install uv
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: actions/download-artifact@v8
+        with:
+          name: dao-modman-windows
+      - name: Tag the tested commit and create the GitHub release, with the Windows zip
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          uvx "$GIT_CLIFF" --unreleased --tag "$TAG" --strip header > notes.md
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "$TAG"
+          git push origin "$TAG"
+          gh release create "$TAG" --title "${TAG#v}" --notes-file notes.md --verify-tag \
+            dao-modman-windows.zip
+
   publish:
-    needs: build
+    needs: [build, github-release]
     runs-on: ubuntu-latest
     environment:
       name: pypi
@@ -104,11 +126,3 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
       - run: uv publish
-
-  windows-exe:
-    needs: [release, publish] # the exe installs dao-modman from PyPI
-    permissions:
-      contents: write # attach the zip to the release
-    uses: ./.github/workflows/windows-exe.yml
-    with:
-      tag: ${{ needs.release.outputs.tag }}
