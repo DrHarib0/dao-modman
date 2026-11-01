@@ -358,6 +358,7 @@ def test_failed_apply_is_rolled_back(
 
     # a failure at the very end, while registering AddIns, undoes the copied files too
     monkeypatch.setattr(deploy, "_write_hashed", real_write)
+    real_register = deploy.addins.register
     monkeypatch.setattr(deploy.addins, "register", lambda *_: (_ for _ in ()).throw(OSError("no")))
     with pytest.raises(deploy.DeployError, match="rolled back"):
         deploy.apply(deploy.build_plan(library), user_dir, deployed)
@@ -365,7 +366,7 @@ def test_failed_apply_is_rolled_back(
     assert addin_uids(user_dir) == ["dlc"]
 
     # an interruption (ctrl+c) is rolled back as well, and passed on unchanged
-    monkeypatch.undo()
+    monkeypatch.setattr(deploy.addins, "register", real_register)
     monkeypatch.setattr(
         deploy, "_write_hashed", lambda *_: (_ for _ in ()).throw(KeyboardInterrupt())
     )
@@ -781,10 +782,13 @@ def test_clone_failure_falls_back_to_copying(
     assert deploy.unapply(library.dirs.deployed_file).removed == 2  # hashes match the copies
 
 
-def test_real_clone(tmp_path: Path, library: Library, user_dir: Path) -> None:
+def test_real_clone(
+    tmp_path: Path, library: Library, user_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Clones where the filesystem can (btrfs, XFS ...); pytest's tmp often cannot."""
     if not sys.platform.startswith("linux"):
         pytest.skip("reflinks are used on Linux")
+    monkeypatch.setattr(deploy, "_LINK", deploy.REFLINK)
     probe, copy = tmp_path / "probe", tmp_path / "probe-copy"
     probe.write_bytes(b"x" * 4096)
     with probe.open("rb") as src, copy.open("xb") as out:

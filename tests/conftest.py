@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from dao_modman.core import updates
+from dao_modman.core import deploy, updates
 from dao_modman.core.library import Library
 from dao_modman.core.paths import Dirs
 
@@ -18,6 +18,15 @@ def no_update_check(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     monkeypatch.setattr(updates, "latest", offline)
+
+
+@pytest.fixture(autouse=True)
+def copy_files(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Apply copies, the same on every OS. Tests that edit an applied or a library file in
+    place would otherwise edit both on Windows, where apply hard-links them. The link tests
+    switch linking on themselves."""
+    monkeypatch.setattr(deploy, "_LINK", None)
+    monkeypatch.setattr(deploy, "_unlinkable", set())
 
 
 MANIFEST = """<?xml version="1.0" encoding="utf-8"?>

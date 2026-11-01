@@ -28,6 +28,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 20 # a hanging test fails the job instead of running for hours
     strategy:
       fail-fast: false
       matrix:
@@ -46,6 +47,7 @@ jobs:
 
   test-windows:
     runs-on: windows-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v5
         with:
