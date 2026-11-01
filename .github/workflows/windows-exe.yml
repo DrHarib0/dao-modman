@@ -28,6 +28,9 @@ jobs:
       contents: write # attach the zip to the release
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0 # the version comes from the git tags
       - name: Build dao-modman.exe
         shell: pwsh
         run: ./packaging/windows/build.ps1

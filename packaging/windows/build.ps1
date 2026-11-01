@@ -28,12 +28,16 @@ $source = Join-Path $work "pyapp-$PyAppVersion"
 # What the exe installs and how it runs it; see https://ofek.dev/pyapp/latest/config/
 # An unpinned requirement installs the newest dao-modman, and `self update` upgrades it to
 # the newest again. PyApp still wants a version: with a dependency file it is only a label,
-# the newest release at build time.
+# taken from the git tags like the package's own version (a full checkout is needed).
+$described = git -C $PSScriptRoot describe --tags --match "v*" 2>$null
+if ($LASTEXITCODE -ne 0 -or -not $described) {
+    throw "no release tag found: build from a full checkout (git fetch --tags --unshallow)"
+}
 $requirements = Join-Path $work "requirements.txt"
 Set-Content -Path $requirements -Value "dao-modman" -Encoding ascii
 $env:PYAPP_PROJECT_NAME = "dao-modman"
 $env:PYAPP_PROJECT_DEPENDENCY_FILE = $requirements
-$env:PYAPP_PROJECT_VERSION = (Invoke-RestMethod "https://pypi.org/pypi/dao-modman/json").info.version
+$env:PYAPP_PROJECT_VERSION = $described.TrimStart("v")   # e.g. 0.5.0, or 0.5.0-3-g54b4c41
 $env:PYAPP_EXEC_MODULE = "dao_modman"
 $env:PYAPP_PYTHON_VERSION = "3.14"
 $env:PYAPP_UV_ENABLED = "1"              # uv installs much faster than pip
