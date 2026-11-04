@@ -17,7 +17,6 @@ from .core import (
     nxm_handler,
     paths,
     report,
-    revisions,
     terminal,
     windows,
 )
@@ -179,18 +178,6 @@ def cmd_chargen() -> int:
     return 1 if result and result.dangling else 0
 
 
-def cmd_revisions() -> int:
-    data_dir = load_config().dirs.data
-    if not revisions.init(data_dir):
-        print("error: could not create a git repository (is git installed?)", file=sys.stderr)
-        return 1
-    print(f"tracking the library's metadata in {data_dir}")
-    print("every change is now committed there; look at it with:")
-    print(f"  git -C '{data_dir}' log --stat")
-    print(f"to stop, delete {data_dir / '.git'}")
-    return 0
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="dao-modman", description=__doc__)
     commands = parser.add_subparsers(dest="command")
@@ -214,10 +201,6 @@ def main(argv: list[str] | None = None) -> int:
     commands.add_parser(
         "conflicts", help="report files that several mods ship, and whose copy is used"
     )
-    revisions_cmd = commands.add_parser(
-        "revisions", help="keep a history of the library's metadata in git (debugging aid)"
-    )
-    revisions_cmd.add_argument("action", choices=["init"])
     commands.add_parser(
         "chargen", help="report on the merged character creator list and its broken entries"
     )
@@ -242,8 +225,6 @@ def _run(args: argparse.Namespace) -> int:
         return cmd_nxm(args.url)
     if args.command == "chargen":
         return cmd_chargen()
-    if args.command == "revisions":
-        return cmd_revisions()
     if args.command == "conflicts":
         return cmd_conflicts()
     if args.command == "console":

@@ -114,7 +114,6 @@ Most functionality is also exposed via a command line interface:
     dao-modman nxm --uninstall-handler     # unregister again
     dao-modman laa status|restore|patch --exe PATH   # Large Address Aware patch
     dao-modman console status|enable|disable   # developer console
-    dao-modman revisions init              # keep a git history of the library's metadata
     dao-modman chargen                     # check the merged character creator list
     dao-modman conflicts                   # which mods ship the same files, and who wins
 

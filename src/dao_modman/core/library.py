@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from . import archive as archives
-from . import dazip, metadata, overridepkg, pathops, revisions
+from . import dazip, metadata, overridepkg, pathops
 from .dazip import AddIn
 from .ignore import DEFAULT_PATTERNS, IgnoreRules
 from .models import (
@@ -116,22 +116,13 @@ class Library:
         entries += [ProfileEntry(id=mod_id) for mod_id in self.mods if mod_id not in seen]
         self.profile.mods = entries
 
-    def save_profile(self, action: str = "change the profile") -> None:
-        """Write profile.toml; `action` describes the change for the revision history."""
+    def save_profile(self) -> None:
         metadata.save_profile(self.dirs.profile_file, self.profile)
-        revisions.snapshot(self.dirs.data, action)
 
-    def save_mod(self, mod: Mod, action: str | None = None) -> None:
-        """Write the mod's mod.toml; `action` describes the change for the revision history."""
-        self.save_mods([mod], action or f"change {mod.id}")
+    def save_mod(self, mod: Mod) -> None:
+        metadata.save_mod(self.dirs.mods / mod.id, mod)
 
-    def save_mods(self, mods: list[Mod], action: str) -> None:
-        """Write several mods' mod.toml files, as one revision."""
-        for mod in mods:
-            metadata.save_mod(self.dirs.mods / mod.id, mod)
-        revisions.snapshot(self.dirs.data, action)
-
-    def set_endorsed(self, statuses: dict[int, bool], action: str) -> list[Mod]:
+    def set_endorsed(self, statuses: dict[int, bool]) -> list[Mod]:
         """Record endorsements by Nexus mod id, on every library mod of that Nexus mod."""
         changed = [
             mod
@@ -142,8 +133,7 @@ class Library:
         ]
         for mod in changed:
             mod.nexus.endorsed = statuses[mod.nexus.mod_id]
-        if changed:
-            self.save_mods(changed, action)
+            self.save_mod(mod)
         return changed
 
     # -- queries ----------------------------------------------------------
@@ -223,7 +213,7 @@ class Library:
         value = key.value(label)
         if value is not None and value is not key.value(key.default):
             mod.options[key.id] = value.label
-        self.save_mod(mod, f"{mod.id}: set option {key.id} = {label}")
+        self.save_mod(mod)
 
     def addins(self, mod: Mod, targets: dict[str, str] | None = None) -> list[AddIn]:
         """The mod's AddIns to register: those whose dazip still has files to deploy."""
@@ -346,7 +336,7 @@ class Library:
         self.mods[mod.id] = mod
         self._listings.pop(mod.id, None)
         self.profile.mods.append(ProfileEntry(id=mod.id))
-        self.save_profile(f"import {mod.id} from {archive.name}")
+        self.save_profile()
         return mod
 
     def replace_archive(
@@ -356,7 +346,6 @@ class Library:
         *,
         version: str = "",
         nexus: NexusInfo | None = None,
-        action: str | None = None,
     ) -> Mod:
         """Swap a mod's files for a new archive, keeping its id, load order and path ops."""
         archive = self._store(archive)
@@ -371,7 +360,7 @@ class Library:
             current.rename(stage / "old")
             files.rename(current)
             self._listings.pop(mod.id, None)
-            self.save_mod(mod, action or f"{mod.id}: replace archive with {archive.name}")
+            self.save_mod(mod)
         except (archives.ArchiveError, dazip.DazipError) as exc:
             raise LibraryError(str(exc)) from exc
         finally:
@@ -392,20 +381,14 @@ class Library:
             raise LibraryError(f"{mod.name}: {archive.name} is no longer in downloads{again}")
         if archives.sha256_file(archive) != mod.archive.sha256:
             raise LibraryError(f"{mod.name}: {archive.name} has changed since it was added{again}")
-        return self.replace_archive(
-            mod,
-            archive,
-            version=mod.version,
-            nexus=mod.nexus,
-            action=f"{mod.id}: restore from {archive.name}",
-        )
+        return self.replace_archive(mod, archive, version=mod.version, nexus=mod.nexus)
 
     def remove(self, mod_id: str, *, delete_archive: bool = False) -> None:
         mod = self.mods.pop(mod_id)
         self._listings.pop(mod_id, None)
         shutil.rmtree(self.dirs.mods / mod_id)
         self.profile.mods = [entry for entry in self.profile.mods if entry.id != mod_id]
-        self.save_profile(f"remove {mod_id}")
+        self.save_profile()
         if delete_archive and mod.archive:
             in_use = any(
                 m.archive and m.archive.file == mod.archive.file for m in self.mods.values()

@@ -400,18 +400,6 @@ it, like any mod's readme, and are not installed again. Other ignored files and 
 are left where they are, and do not trigger the startup notice. Official DLC is never touched. `AddIns.xml` does not record which AddIns came from one dazip, so a mod made
 of several AddIns, like The Winter Forge, becomes several mods.
 
-## Library revisions
-
-A debugging aid: `dao-modman revisions init` turns the data directory into a git repository.
-From then on every change to the library's metadata is committed there with the action as
-its message ("disable some-mod", "bodies: set option Humans/Body = Big", "apply: 2862
-files"), so it is possible to see afterwards what changed when:
-
-    git -C ~/.local/share/dao-modman log --stat
-
-Only `mod.toml` files, `profile.toml` and `deployed.json` are tracked, never archives or
-extracted mod files. There is no restore. To stop, delete the `.git` folder there.
-
 ## Official DLC and other AddIns
 
 The game's `Settings/addins.xml` already lists its own DLC, and dazip mods are registered in

@@ -14,7 +14,7 @@ import pytest
 from dao_modman.core import archive as archives
 from dao_modman.core import metadata
 from dao_modman.core.library import Library, LibraryError, slugify
-from dao_modman.core.models import KIND_DAZIP, KIND_MIXED, KIND_OVERRIDE, PathOp
+from dao_modman.core.models import KIND_DAZIP, KIND_MIXED, KIND_OVERRIDE, NexusInfo, PathOp
 
 from .conftest import make_dazip, make_zip, symlink
 
@@ -387,3 +387,22 @@ def test_restore_from_the_archive(tmp_path: Path, library: Library) -> None:
     archive.unlink()
     with pytest.raises(LibraryError, match="no longer in downloads"):
         library.restore(mod)
+
+
+def test_endorsements_are_stored_per_nexus_mod(tmp_path: Path, library: Library) -> None:
+    for file_id in (1, 2):  # two files of one Nexus mod share its endorsement
+        library.import_archive(
+            make_zip(tmp_path / f"m{file_id}.zip", {f"{file_id}.erf": "x"}),
+            nexus=NexusInfo("dragonage", 7, file_id),
+        )
+    assert len(library.set_endorsed({7: True, 99: True})) == 2  # 99 is not in the library
+    assert library.set_endorsed({7: True}) == []  # nothing changed, nothing written
+    assert all(mod.nexus.endorsed for mod in Library(library.dirs).mods.values())
+    assert "endorsed = true" in (library.dirs.mods / "m1" / "mod.toml").read_text()
+    # updating to a newer file of the same Nexus mod keeps it
+    newer = library.replace_archive(
+        library.mods["m1"],
+        make_zip(tmp_path / "m3.zip", {"3.erf": "y"}),
+        nexus=NexusInfo("dragonage", 7, 3),
+    )
+    assert newer.nexus.file_id == 3 and newer.nexus.endorsed

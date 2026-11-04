@@ -32,7 +32,6 @@ from ..core import (
     pathops,
     paths,
     report,
-    revisions,
     terminal,
     textures,
     updates,
@@ -644,13 +643,13 @@ class ModManApp(App[None]):
     def action_toggle(self) -> None:
         if entry := self.current_entry():
             entry.enabled = not entry.enabled
-            self.library.save_profile(f"{'enable' if entry.enabled else 'disable'} {entry.id}")
+            self.library.save_profile()
             self.refresh_table()
 
     def action_toggle_official(self) -> None:
         profile = self.library.profile
         profile.hide_official = not profile.hide_official
-        self.library.save_profile(f"{'hide' if profile.hide_official else 'show'} official DLC")
+        self.library.save_profile()
         self.refresh_table()
 
     def action_filter(self) -> None:
@@ -684,7 +683,7 @@ class ModManApp(App[None]):
             return
         entry = self.current_entry()
         if entry and self.library.profile.move(entry.id, delta):
-            self.library.save_profile(f"move {entry.id} {'down' if delta > 0 else 'up'}")
+            self.library.save_profile()
             self.refresh_table(select=entry.id)
 
     def action_rename(self) -> None:
@@ -696,7 +695,7 @@ class ModManApp(App[None]):
         def done(name: str | None) -> None:
             if name and name != mod.name:
                 mod.name = name
-                self.library.save_mod(mod, f"{mod.id}: rename to {name}")
+                self.library.save_mod(mod)
                 self.refresh_table()
 
         self.push_screen(TextPromptScreen("Rename mod", mod.name), done)
@@ -709,7 +708,7 @@ class ModManApp(App[None]):
         def done(group: str | None) -> None:
             if group is not None:
                 entry.group = group
-                self.library.save_profile(f"{entry.id}: set group to {group or '(none)'}")
+                self.library.save_profile()
                 self.refresh_table()
 
         groups = sorted({e.group for e in self.library.profile.mods if e.group}, key=str.casefold)
@@ -764,7 +763,7 @@ class ModManApp(App[None]):
         def done(ops: list[PathOp] | None) -> None:
             if ops is not None:
                 mod.ops = ops
-                self.library.save_mod(mod, f"{mod.id}: choose files ({len(ops)} operations)")
+                self.library.save_mod(mod)
                 self.refresh_table()
 
         base = self.library.default_targets(mod, ignored=True)
@@ -846,7 +845,7 @@ class ModManApp(App[None]):
         try:
             if ask:
                 statuses |= await self.nexus.endorsed(ask)
-            changed = self.library.set_endorsed(statuses, "record Nexus endorsements")
+            changed = self.library.set_endorsed(statuses)
         except (NexusError, OSError) as exc:
             self.error(f"Cannot check your endorsements: {exc}")
             return
@@ -877,7 +876,7 @@ class ModManApp(App[None]):
             return
         verb = "Took back the endorsement of" if endorsed else "Endorsed"
         try:
-            self.library.set_endorsed({mod_id: not endorsed}, f"{verb.lower()} {mod.name} on Nexus")
+            self.library.set_endorsed({mod_id: not endorsed})
         except OSError as exc:
             self.error(exc)
         self.refresh_table()
@@ -1139,7 +1138,6 @@ class ModManApp(App[None]):
             return
         finally:
             self.refresh_status()
-        revisions.snapshot(self.config.dirs.data, f"apply: {result.written} files")
         linked = f" ({result.linked} linked)" if result.linked else ""
         message = (
             f"Applied: wrote {result.written} file(s){linked}, removed {result.removed},"
@@ -1290,7 +1288,6 @@ class ModManApp(App[None]):
         finally:
             self.refresh_foreign()
             self.refresh_table()
-        revisions.snapshot(self.config.dirs.data, f"unapply{' and clean' if clean else ''}")
         message = f"Removed {result.removed} applied file(s)"
         if clean:
             message += f" and {cleaned} that dao-modman did not manage"
