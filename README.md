@@ -35,7 +35,7 @@ and mods have addressed those issues. Most of them were targeted for windows and
 - Mixed mods with both `addins` and `override` files: these often need manual steps with the Windows-based mod managers.
 - Configurable mods: supports the `.override` format introduced by [DAO-Modmanager](https://www.nexusmods.com/dragonage/mods/277)
 - `chargenmorphcfg.xml` merging: runs automatically if you add/remove a mod containing character morphs
-- Nexus Integration: Download mods from [nexusmods](https://www.nexusmods.com/games/dragonage)
+- Nexus Integration: Download mods from [nexusmods](https://www.nexusmods.com/games/dragonage), check for updates and endorse mods
 - Archive formats: `.dazip`, `.override`, `.zip`, `.7z` and `.rar`, also nested
 - Fast apply: only what changed is written, and files are cloned (Linux: btrfs, XFS) or hard-linked (Windows) instead of copied where the filesystem allows, so applying takes no extra disk space
 - Conflict Detection: see which mod overwrites which, and decide by load order or by leaving single files out

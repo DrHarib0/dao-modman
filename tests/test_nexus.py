@@ -261,3 +261,40 @@ async def test_requests_name_the_installed_version() -> None:
     assert headers["Application-Name"] == "dao-modman"
     assert headers["Application-Version"] == version("dao-modman")  # not a hand-kept constant
     assert headers["User-Agent"] == f"dao-modman/{version('dao-modman')}"
+
+
+async def test_endorsements() -> None:
+    seen: list[httpx2.Request] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        seen.append(request)
+        path = request.url.path
+        if path == "/v1/games/dragonage/mods/7.json":
+            return httpx2.Response(200, json={"endorsement": {"endorse_status": "Endorsed"}})
+        if path == "/v1/games/dragonage/mods/8.json":
+            return httpx2.Response(200, json={"endorsement": {"endorse_status": "Abstained"}})
+        if path == "/v1/games/dragonage/mods/9.json":  # hidden by its author
+            return httpx2.Response(404, json={"message": "Mod not found"})
+        if path == "/v1/games/dragonage/mods/10.json":
+            return httpx2.Response(200, json={"endorsement": None})
+        if path == "/v1/games/dragonage/mods/5/endorse.json":
+            return httpx2.Response(403, json={"message": "TOO_SOON_AFTER_DOWNLOAD"})
+        if path == "/v1/games/dragonage/mods/6/endorse.json":
+            return httpx2.Response(403, json={"message": "SOMETHING_NEW"})
+        return httpx2.Response(200, json={"message": "ok"})
+
+    client = NexusClient("secret", transport=httpx2.MockTransport(handler))
+    assert await client.endorsed({7, 8, 9, 10}) == {7: True, 8: False, 10: False}  # 9 hidden
+    await client.endorse(7, "1.2")
+    await client.abstain(7, "1.2")
+    with pytest.raises(NexusError, match="15 minutes after downloading"):
+        await client.endorse(5, "1.0")
+    with pytest.raises(NexusError, match="SOMETHING_NEW"):  # unknown refusals as they are
+        await client.endorse(6, "1.0")
+    await client.aclose()
+    posts = [(r.method, r.url.path, r.content) for r in seen if r.method == "POST"][:2]
+    assert posts == [
+        ("POST", "/v1/games/dragonage/mods/7/endorse.json", b"version=1.2"),
+        ("POST", "/v1/games/dragonage/mods/7/abstain.json", b"version=1.2"),
+    ]
+    assert all(r.headers["apikey"] == "secret" for r in seen)

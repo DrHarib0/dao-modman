@@ -73,6 +73,8 @@ def mod_to_dict(mod: Mod) -> dict[str, Any]:
         }
         if mod.nexus.uploaded:
             nexus["uploaded"] = mod.nexus.uploaded
+        if mod.nexus.endorsed is not None:
+            nexus["endorsed"] = mod.nexus.endorsed
         data["nexus"] = nexus
     if mod.addin_uids:
         data["addin"] = {"uids": mod.addin_uids}
@@ -106,6 +108,7 @@ def mod_from_dict(raw: dict[str, Any]) -> Mod:
                 file_id=int(nexus["file_id"]),
                 file_name=str(nexus.get("file_name", "")),
                 uploaded=nexus.get("uploaded"),
+                endorsed=nexus.get("endorsed") if isinstance(nexus.get("endorsed"), bool) else None,
             )
         mod.addin_uids = [str(uid) for uid in raw.get("addin", {}).get("uids", [])]
         mod.options = {str(k): str(v) for k, v in raw.get("options", {}).items()}

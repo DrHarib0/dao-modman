@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import os
 import re
@@ -20,6 +21,13 @@ from .models import NexusInfo
 API_BASE = "https://api.nexusmods.com/v1"
 GAME = "dragonage"
 APP_NAME = "dao-modman"
+
+# why Nexus refuses an endorsement: the codes it answers with
+REFUSALS = {
+    "NOT_DOWNLOADED_MOD": "download the mod from Nexus first",
+    "TOO_SOON_AFTER_DOWNLOAD": "mods can be endorsed 15 minutes after downloading them",
+    "IS_OWN_MOD": "you cannot endorse your own mod",
+}
 
 
 def _app_version() -> str:
@@ -152,9 +160,15 @@ class NexusClient:
         await self._api.aclose()
         await self._cdn.aclose()
 
-    async def _get(self, path: str, **params: str) -> dict | list:
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, str] | None = None,
+        data: dict[str, str] | None = None,
+    ) -> dict | list:
         try:
-            response = await self._api.get(path, params=params or None)
+            response = await self._api.request(method, path, params=params or None, data=data)
         except httpx2.HTTPError as exc:
             raise NexusError(f"Nexus request failed: {exc.__class__.__name__}") from exc
         if response.status_code == 429:
@@ -173,6 +187,9 @@ class NexusClient:
             )
         return response.json()
 
+    async def _get(self, path: str, **params: str) -> dict | list:
+        return await self._request("GET", path, params=params)
+
     async def validate(self) -> dict:
         """Account info for the token (`name`, `is_premium`, ...)."""
         return cast(dict, await self._get("/users/validate.json"))
@@ -186,6 +203,52 @@ class NexusClient:
 
     async def file(self, mod_id: int, file_id: int) -> dict:
         return cast(dict, await self._get(f"/games/{GAME}/mods/{mod_id}/files/{file_id}.json"))
+
+    async def endorsed(self, mod_ids: set[int]) -> dict[int, bool]:
+        """Whether the account endorses each of these Dragon Age mods.
+
+        Asked mod by mod: the account's endorsement list (`/user/endorsements.json`) misses
+        recent endorsements. Mods Nexus no longer shows (hidden, deleted) are left out.
+        """
+        limit = asyncio.Semaphore(6)
+
+        async def status(mod_id: int) -> str | None:
+            async with limit:
+                try:
+                    info = await self.mod(mod_id)
+                except NexusError as exc:
+                    if exc.status in (403, 404, 410):
+                        return None
+                    raise
+            endorsement = info.get("endorsement")
+            if not isinstance(endorsement, dict):
+                return ""  # Nexus answered without a status: not endorsed
+            return str(endorsement.get("endorse_status", ""))
+
+        ids = sorted(mod_ids)
+        statuses = await asyncio.gather(*(status(mod_id) for mod_id in ids))
+        return {
+            mod_id: state == "Endorsed"
+            for mod_id, state in zip(ids, statuses, strict=True)
+            if state is not None
+        }
+
+    async def endorse(self, mod_id: int, version: str) -> None:
+        await self._endorsement(mod_id, "endorse", version)
+
+    async def abstain(self, mod_id: int, version: str) -> None:
+        """Take an endorsement back (Nexus calls it abstaining)."""
+        await self._endorsement(mod_id, "abstain", version)
+
+    async def _endorsement(self, mod_id: int, action: str, version: str) -> None:
+        path = f"/games/{GAME}/mods/{mod_id}/{action}.json"
+        try:
+            await self._request("POST", path, data={"version": version})
+        except NexusError as exc:
+            reason = next((text for code, text in REFUSALS.items() if code in str(exc)), None)
+            if exc.status == 403 and reason:
+                raise NexusError(f"Nexus refused: {reason}", exc.status) from exc
+            raise
 
     async def md5_search(self, md5: str) -> list:
         return cast(list, await self._get(f"/games/{GAME}/mods/md5_search/{md5}.json"))

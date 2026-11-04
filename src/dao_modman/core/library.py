@@ -123,8 +123,28 @@ class Library:
 
     def save_mod(self, mod: Mod, action: str | None = None) -> None:
         """Write the mod's mod.toml; `action` describes the change for the revision history."""
-        metadata.save_mod(self.dirs.mods / mod.id, mod)
-        revisions.snapshot(self.dirs.data, action or f"change {mod.id}")
+        self.save_mods([mod], action or f"change {mod.id}")
+
+    def save_mods(self, mods: list[Mod], action: str) -> None:
+        """Write several mods' mod.toml files, as one revision."""
+        for mod in mods:
+            metadata.save_mod(self.dirs.mods / mod.id, mod)
+        revisions.snapshot(self.dirs.data, action)
+
+    def set_endorsed(self, statuses: dict[int, bool], action: str) -> list[Mod]:
+        """Record endorsements by Nexus mod id, on every library mod of that Nexus mod."""
+        changed = [
+            mod
+            for mod in self.mods.values()
+            if mod.nexus
+            and mod.nexus.mod_id in statuses
+            and mod.nexus.endorsed != statuses[mod.nexus.mod_id]
+        ]
+        for mod in changed:
+            mod.nexus.endorsed = statuses[mod.nexus.mod_id]
+        if changed:
+            self.save_mods(changed, action)
+        return changed
 
     # -- queries ----------------------------------------------------------
 
@@ -344,6 +364,8 @@ class Library:
         try:
             files = self._stage(archive, stage)
             self._describe(mod, archive, files, mod.name, version)
+            if nexus and mod.nexus and nexus.mod_id == mod.nexus.mod_id:
+                nexus.endorsed = mod.nexus.endorsed  # a newer file of the same Nexus mod
             mod.nexus = nexus
             current = self.files_dir(mod.id)
             current.rename(stage / "old")

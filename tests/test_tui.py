@@ -117,7 +117,7 @@ async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_
         await app.workers.wait_for_complete()
         await pilot.pause()
         assert [row[2] for row in rows(app)] == ["mod"]
-        assert rows(app)[0][7] == "1"  # the readme, by the ignore patterns
+        assert rows(app)[0][8] == "1"  # the readme, by the ignore patterns
 
         # exclude the docs folder, include the readme
         await pilot.press("e")
@@ -141,7 +141,7 @@ async def test_import_edit_paths_apply_unapply(tmp_path: Path, dirs: Dirs, user_
         assert tree.ignored == {f"{OVERRIDE}/mod/docs", f"{OVERRIDE}/mod/docs/extra.erf"}
         await pilot.press("s")
         await pilot.pause()
-        assert rows(app)[0][7] == "1"  # now docs/extra.erf
+        assert rows(app)[0][8] == "1"  # now docs/extra.erf
 
         await pilot.press("a")
         assert isinstance(app.screen, ConfirmScreen)
@@ -755,8 +755,8 @@ async def test_conflicts_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path) -> N
 
         app.library.import_archive(make_zip(tmp_path / "Beta.zip", {"robe.dds": "b"}))
         app.refresh_table()
-        assert rows(app)[0][8] == "not applied, overwritten by Beta"
-        assert rows(app)[1][8] == "not applied, overwrites Alpha"
+        assert rows(app)[0][9] == "not applied, overwritten by Beta"
+        assert rows(app)[1][9] == "not applied, overwrites Alpha"
         await pilot.press("v")
         assert isinstance(app.screen, ConflictsScreen)
         tree = app.screen.query_one(Tree)
@@ -797,7 +797,7 @@ async def test_notes_show_who_overwrites_whom(tmp_path: Path, dirs: Dirs, user_d
     taken.write_text("by hand")
 
     def notes(app: ModManApp) -> list[str]:  # nothing is applied here: leave that note out
-        return [row[8].removeprefix("not applied").removeprefix(", ") for row in rows(app)]
+        return [row[9].removeprefix("not applied").removeprefix(", ") for row in rows(app)]
 
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
@@ -835,7 +835,7 @@ async def test_notes_show_mods_without_files_of_their_own(
 
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)):
-        assert [row[8] for row in rows(app)] == [
+        assert [row[9] for row in rows(app)] == [
             "no effect: same files as Fix again",
             "not applied",
             "merged",
@@ -861,7 +861,7 @@ async def test_package_options_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path
     app = make_app(tmp_path, dirs, user_dir)
     async with app.run_test(size=(140, 40)) as pilot:
         assert [row[5] for row in rows(app)] == ["override", "package"]
-        assert [row[8] for row in rows(app)] == ["not applied", "not applied, options"]
+        assert [row[9] for row in rows(app)] == ["not applied", "not applied, options"]
 
         await pilot.press("p")  # a mod without options
         assert not isinstance(app.screen, OptionsScreen)
@@ -895,7 +895,7 @@ async def test_package_options_dialog(tmp_path: Path, dirs: Dirs, user_dir: Path
 
         await pilot.press("escape")
         await pilot.pause()
-        assert rows(app)[1][8] == "not applied, options (1 changed)"
+        assert rows(app)[1][9] == "not applied, options (1 changed)"
 
         # the path editor shows the deployed name together with the variant behind it
         await pilot.press("e")
@@ -1876,3 +1876,69 @@ async def test_restore_without_the_archive_is_reported(
         await app.workers.wait_for_complete()
         assert any("no longer in downloads" in n.message for n in app._notifications)
         assert not isinstance(app.screen, ConfirmScreen)  # nothing restored: no second question
+
+
+async def test_endorsements_are_stored_and_checked_once(
+    tmp_path: Path, dirs: Dirs, user_dir: Path
+) -> None:
+    library = Library(dirs)
+    library.import_archive(make_zip(tmp_path / "Fan.zip", {"a.erf": "a"}))
+    for name, mod_id, file_id in [("Liked", 7, 1), ("Liked too", 7, 2), ("Known", 8, 3)]:
+        library.import_archive(
+            make_zip(tmp_path / f"{name}.zip", {f"{file_id}.erf": "b"}),
+            nexus=NexusInfo("dragonage", mod_id, file_id),
+        )
+    known = next(mod for mod in library.mods.values() if mod.name == "Known")
+    known.nexus.endorsed = True  # checked before: not asked again
+    library.save_mod(known)
+    on_nexus = {7: "Endorsed", 8: "Abstained"}  # taken back on the website since
+    asked: list[int] = []
+    posted: list[str] = []
+
+    def handler(request: httpx2.Request) -> httpx2.Response:
+        path = request.url.path
+        if path.endswith("/users/validate.json"):
+            return httpx2.Response(200, json={"name": "seb", "is_premium": True})
+        if request.method == "POST":
+            posted.append(path.rsplit("/", 1)[-1])
+            return httpx2.Response(200, json={"message": "ok"})
+        if path.endswith("/files.json"):
+            return httpx2.Response(200, json={"files": [], "file_updates": []})
+        mod_id = int(path.rsplit("/", 1)[-1].removesuffix(".json"))
+        asked.append(mod_id)
+        return httpx2.Response(200, json={"endorsement": {"endorse_status": on_nexus[mod_id]}})
+
+    def hearts(app: ModManApp) -> list[str]:
+        return [row[7] for row in rows(app)]
+
+    def stored() -> dict[str, bool | None]:
+        return {m.name: m.nexus.endorsed for m in Library(dirs).mods.values() if m.nexus}
+
+    def make() -> ModManApp:
+        return ModManApp(
+            Config(dirs=dirs, game_user_dir=user_dir, nexus_token="secret"),
+            transport=httpx2.MockTransport(handler),
+        )
+
+    async with make().run_test(size=(140, 40)) as pilot:
+        app = pilot.app
+        await app.workers.wait_for_complete()
+        assert asked == [7]  # once for both of its files; Known was checked
+        assert hearts(app) == ["", "\u2665", "\u2665", "\u2665"]
+        assert stored() == {"Liked": True, "Liked too": True, "Known": True}
+        await pilot.press("E")  # the first mod is not from Nexus
+        await app.workers.wait_for_complete()
+        assert "Fan is not from Nexus" in [n.message for n in app._notifications][-1]
+        await pilot.press("down", "E")
+        await app.workers.wait_for_complete()
+        assert posted == ["abstain.json"] and hearts(app) == ["", "", "", "\u2665"]
+        assert stored() == {"Liked": False, "Liked too": False, "Known": True}
+    async with make().run_test(size=(140, 40)) as pilot:  # a new start asks nothing
+        app = pilot.app
+        await app.workers.wait_for_complete()
+        assert asked == [7] and hearts(app) == ["", "", "", "\u2665"]
+        on_nexus[7] = "Abstained"
+        await pilot.press("c")  # checking for updates checks every endorsement again
+        await app.workers.wait_for_complete()
+        assert sorted(asked[1:]) == [7, 8] and hearts(app) == ["", "", "", ""]
+        assert stored() == {"Liked": False, "Liked too": False, "Known": False}

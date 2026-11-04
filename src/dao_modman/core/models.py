@@ -42,6 +42,7 @@ class NexusInfo:
     file_id: int
     file_name: str = ""
     uploaded: datetime | None = None
+    endorsed: bool | None = None  # by the user's account; None: not checked yet
 
 
 @dataclass

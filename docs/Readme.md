@@ -120,6 +120,13 @@ Adding a file that is in the library already (the same Nexus file, or an archive
 same content) asks first: from the add dialog, from an `nxm://` link, or when importing an
 archive. Yes adds it again as another mod.
 
+The ♥ column marks the mods you endorse on Nexus. `E` endorses the selected mod, or takes the
+endorsement back; it applies to the Nexus mod, so all its files in the library show it. Nexus
+only accepts endorsements for mods you downloaded, 15 minutes after the download at the
+earliest. The status is kept in each mod's `mod.toml` (`endorsed` under `[nexus]`), so Nexus is
+asked only once per mod, when it is new to the library. Endorsements given or taken back on
+the website show up after the next update check (`c`), which checks them all again.
+
 ### The nxm:// handler
 
 After `dao-modman nxm --install-handler`, clicking "Mod Manager Download" in the browser

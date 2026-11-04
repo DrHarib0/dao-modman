@@ -77,9 +77,10 @@ from .screens import (
 from .settings import SettingsScreen, SetupWizard
 
 ENABLED = "✓"
+ENDORSED = "♥"  # the text heart: one cell wide everywhere, unlike the emoji
 T = TypeVar("T")
 
-COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", "Ignored", "Notes")
+COLUMNS = ("#", "On", "Name", "Version", "Group", "Kind", "Source", ENDORSED, "Ignored", "Notes")
 
 
 @dataclass
@@ -168,6 +169,7 @@ KEYS = [
     Key("o", "open_page", "Nexus page", "Open the mod's Nexus page in the browser", "Nexus"),
     Key("c", "check_updates", "Check", "Check Nexus for updates", "Nexus"),
     Key("u", "update", "Update", "Update the mod to its newest file", "Nexus"),
+    Key("E", "endorse", "Endorse", "Endorse the mod on Nexus, or take that back", "Nexus"),
     Key(
         "t",
         "tools",
@@ -361,6 +363,7 @@ class ModManApp(App[None]):
         self.nexus, self.account = client, account
         self.config.nexus_token, self.config.token_warning = token, None
         self.refresh_status()
+        self.load_endorsements()
         kind = "premium" if account.get("is_premium") else "free"
         self.notify(
             f"Nexus API key saved: account {account.get('name', '?')} ({kind})", markup=False
@@ -456,7 +459,10 @@ class ModManApp(App[None]):
         """Table cells with the `On` mark inserted; disabled rows are dimmed."""
         number, *rest = cells
         style = "" if enabled else "dim"
-        return [Text(cell, style=style) for cell in (number, ENABLED if enabled else "", *rest)]
+        return [
+            Text(cell, style=style + (" red" if cell == ENDORSED else ""))
+            for cell in (number, ENABLED if enabled else "", *rest)
+        ]
 
     def _ignored_note(self, mod: Mod) -> str:
         """How many of the mod's files are not installed (ignore patterns and excludes)."""
@@ -539,7 +545,7 @@ class ModManApp(App[None]):
                 continue
             self._row_ids.append(None)
             source = "game" if addin.uid.casefold() in shipped else "user dir"
-            cells = ("", addin.name, addin.version, "", kind, source, "", "")
+            cells = ("", addin.name, addin.version, "", kind, source, "", "", "")
             table.add_row(*self._cells(addin.enabled, cells), key=f"addin:{addin.uid}")
         for index, (entry, mod) in enumerate(ordered, 1):
             if not self._matches(mod.name, entry.group):
@@ -558,6 +564,7 @@ class ModManApp(App[None]):
                 entry.group,
                 mod.kind,
                 f"nexus:{mod.nexus.mod_id}" if mod.nexus else "local",
+                ENDORSED if mod.nexus and mod.nexus.endorsed else "",
                 self._ignored_note(mod),
                 ", ".join(notes),
             )
@@ -810,6 +817,8 @@ class ModManApp(App[None]):
         linked = self.nexus is not None and await link_to_nexus(self.nexus, self.library, mod)
         self.refresh_table(select=mod.id)
         self.notify(f"Imported {mod.name}" + (" (found on Nexus)" if linked else ""), markup=False)
+        if linked:
+            self.load_endorsements()
 
     # -- nexus ------------------------------------------------------------
 
@@ -821,6 +830,58 @@ class ModManApp(App[None]):
             self.error(exc)
             return
         self.refresh_status()
+        self.load_endorsements()
+
+    @work(exclusive=True, group="endorsements")
+    async def load_endorsements(self, recheck: bool = False) -> None:
+        """Ask Nexus for the endorsement of mods not checked yet (`recheck`: of all mods)."""
+        if not self.nexus:
+            return
+        nexus_mods = [mod.nexus for mod in self.library.mods.values() if mod.nexus]
+        # a mod of the same Nexus mod as a checked one shares its status
+        known = {info.mod_id: info.endorsed for info in nexus_mods if info.endorsed is not None}
+        unchecked = {info.mod_id for info in nexus_mods if info.endorsed is None}
+        ask = {info.mod_id for info in nexus_mods} if recheck else unchecked - known.keys()
+        statuses = {mod_id: known[mod_id] for mod_id in unchecked & known.keys()}
+        try:
+            if ask:
+                statuses |= await self.nexus.endorsed(ask)
+            changed = self.library.set_endorsed(statuses, "record Nexus endorsements")
+        except (NexusError, OSError) as exc:
+            self.error(f"Cannot check your endorsements: {exc}")
+            return
+        if changed:
+            self.refresh_table()
+
+    @work(exclusive=True, group="endorse")
+    async def action_endorse(self) -> None:
+        """Endorse the selected mod on Nexus, or take the endorsement back."""
+        mod = self.current_mod()
+        if not mod:
+            return
+        if not self.nexus:
+            self.error(f"No Nexus API token: {token_hint()}")
+            return
+        if not mod.nexus:
+            self.error(f"{mod.name} is not from Nexus")
+            return
+        mod_id = mod.nexus.mod_id
+        endorsed = bool(mod.nexus.endorsed)
+        try:
+            if endorsed:
+                await self.nexus.abstain(mod_id, mod.version)
+            else:
+                await self.nexus.endorse(mod_id, mod.version)
+        except NexusError as exc:
+            self.error(exc)
+            return
+        verb = "Took back the endorsement of" if endorsed else "Endorsed"
+        try:
+            self.library.set_endorsed({mod_id: not endorsed}, f"{verb.lower()} {mod.name} on Nexus")
+        except OSError as exc:
+            self.error(exc)
+        self.refresh_table()
+        self.notify(f"{verb} {mod.name}", markup=False)
 
     def action_open_page(self) -> None:
         """Open the selected mod's page on Nexus in the browser."""
@@ -924,12 +985,14 @@ class ModManApp(App[None]):
         self.updates.discard(mod.id)
         self.refresh_table(select=mod.id)
         self.notify(f"{'Updated' if updated else 'Installed'} {mod.name}", markup=False)
+        self.load_endorsements()  # the new mod's; a sibling's status costs no request
 
     @work(exclusive=True, group="updates")
     async def action_check_updates(self) -> None:
         if not self.nexus:
             self.error(f"No Nexus API token: {token_hint()}")
             return
+        self.load_endorsements(recheck=True)  # also picks up endorsements given on the website
         listings: dict[int, dict] = {}
         self.updates = set()
         try:

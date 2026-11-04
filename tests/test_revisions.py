@@ -107,3 +107,28 @@ def test_cli_init(
     assert revisions.enabled(dirs.data)
     assert cli.main(["revisions", "init"]) == 0  # running it again is harmless
     assert log(dirs.data) == ["start tracking the library"]
+
+
+def test_endorsements_are_one_revision(tmp_path: Path, dirs: Dirs) -> None:
+    from dao_modman.core.models import NexusInfo
+
+    library = Library(dirs)
+    for file_id in (1, 2):
+        library.import_archive(
+            make_zip(tmp_path / f"m{file_id}.zip", {f"{file_id}.erf": "x"}),
+            nexus=NexusInfo("dragonage", 7, file_id),
+        )
+    assert revisions.init(dirs.data)
+    changed = library.set_endorsed({7: True, 99: True}, "record Nexus endorsements")
+    assert len(changed) == 2 and log(dirs.data)[-1] == "record Nexus endorsements"
+    assert len(log(dirs.data)) == 2  # tracking started, then the two files in one revision
+    assert library.set_endorsed({7: True}, "again") == []  # nothing changed, nothing saved
+    assert all(mod.nexus.endorsed for mod in Library(dirs).mods.values())  # in mod.toml
+    assert "endorsed = true" in (dirs.mods / "m1" / "mod.toml").read_text()
+    # updating to a newer file of the same Nexus mod keeps it
+    newer = library.replace_archive(
+        library.mods["m1"],
+        make_zip(tmp_path / "m3.zip", {"3.erf": "y"}),
+        nexus=NexusInfo("dragonage", 7, 3),
+    )
+    assert newer.nexus.file_id == 3 and newer.nexus.endorsed
