@@ -1304,6 +1304,13 @@ class ModManApp(App[None]):
     def action_launch(self) -> None:
         """Start the game: with launch_command from config.toml, through Steam, or its exe."""
         config = self.config
+        if config.game_install_dir:
+            try:  # Steam puts its own executable back on updates
+                if note := laa.on_launch(config.game_install_dir, config.dirs.data):
+                    severity = "information" if note == laa.REAPPLIED else "warning"
+                    self.notify(note, severity=severity, timeout=10)
+            except laa.LaaError as exc:
+                self.error(exc)
         try:
             launch.launch(config.game_app_id, config.launch_command, config.game_install_dir)
         except launch.LaunchError as exc:
@@ -1325,7 +1332,12 @@ class ModManApp(App[None]):
             state = str(exc)
         tools = [("laa_restore", "Restore the original game executable")]
         if state != laa.PATCHED:
-            tools.insert(0, ("laa_patch", f"Apply the LAA (4 GB) patch - currently {state}"))
+            again = (
+                " again from the saved copy"
+                if laa.kept_exe(self.config.dirs.data).is_file()
+                else ""
+            )
+            tools.insert(0, ("laa_patch", f"Apply the LAA (4 GB) patch{again} - currently {state}"))
         limit = self.config.max_texture_size
         current = textures.LIMITS.get(limit, f"{limit} px")
         tools.append(("texture_size", f"Limit the size of textures - currently {current}"))
@@ -1498,17 +1510,30 @@ class ModManApp(App[None]):
         if not install_dir:
             self.error("Game install folder not found: set it in the settings (s)")
             return
+        data_dir = self.config.dirs.data
+        if laa.kept_exe(data_dir).is_file():
+            try:
+                laa.patch(install_dir, None, data_dir)
+            except laa.LaaError as exc:
+                self.error(exc)
+            else:
+                self.notify("LAA patch applied again from the saved copy")
+            return
 
         def done(path: str | None) -> None:
             if not path:
                 return
             try:
-                backup, was_flagged = laa.patch(install_dir, Path(path))
+                backup, was_flagged = laa.patch(install_dir, Path(path), data_dir)
             except laa.LaaError as exc:
                 self.error(exc)
                 return
             how = "LAA flag set and patch applied" if was_flagged else "LAA patch applied"
-            self.notify(f"{how}, original saved as {backup.name}", markup=False)
+            self.notify(
+                f"{how}, original saved as {backup.name}; a copy is kept in the library and"
+                " applied again on launch when Steam replaces it",
+                markup=False,
+            )
 
         self.open_url(laa.GUIDE_URL)
         title = (
@@ -1523,8 +1548,11 @@ class ModManApp(App[None]):
             return
         try:
             if tool == "laa_restore":
-                laa.restore(install_dir)
-                self.notify("Original game executable restored")
+                laa.restore(install_dir, self.config.dirs.data)
+                self.notify(
+                    "Original game executable restored; launching leaves it alone until the"
+                    " LAA patch is applied again"
+                )
             elif tool == "console_enable":
                 self.enable_console(install_dir)
             elif tool == "console_disable":

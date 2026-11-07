@@ -100,7 +100,8 @@ def _library(config: Config) -> Library:
 
 
 def cmd_laa(action: str, exe: Path | None) -> int:
-    install_dir = load_config().game_install_dir
+    config = load_config()
+    install_dir, data_dir = config.game_install_dir, config.dirs.data
     if not install_dir:
         print(
             "error: game install dir not found: set game_install_dir in config.toml",
@@ -109,19 +110,24 @@ def cmd_laa(action: str, exe: Path | None) -> int:
         return 1
     try:
         if action == "patch":
-            if exe is None:
+            kept = laa.kept_exe(data_dir)
+            if exe is None and not kept.is_file():
                 print(
                     "error: pass a DRM-free or LAA-patched executable with --exe PATH; "
                     f"how to get one:\n  {laa.GUIDE_URL}",
                     file=sys.stderr,
                 )
                 return 1
-            backup, was_flagged = laa.patch(install_dir, exe)
+            backup, was_flagged = laa.patch(install_dir, exe, data_dir)
             if was_flagged:
                 print(f"set the LAA flag on the installed copy of {exe}")
             print(f"patched {laa.game_exe(install_dir)}\noriginal saved as {backup}")
+            print(
+                f"installed the saved copy {kept}" if exe is None else f"a copy is kept as {kept}"
+            )
         elif action == "restore":
-            print(f"restored {laa.restore(install_dir)}")
+            print(f"restored {laa.restore(install_dir, data_dir)}")
+            print("launching from dao-modman leaves it alone until the next 'laa patch'")
         else:
             print(f"{laa.game_exe(install_dir)}: {laa.status(install_dir)}")
     except laa.LaaError as exc:

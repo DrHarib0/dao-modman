@@ -16,6 +16,9 @@ from .paths import resolve_case
 
 EXE_REL = "bin_ship/DAOrigins.exe"
 BACKUP_SUFFIX = ".pre-laa"
+# in the data dir: the patched executable last installed, for when Steam puts its own back
+KEPT_REL = "laa/DAOrigins.exe"
+OFF_REL = "laa/off"  # the original was restored on purpose: launching leaves it alone
 # how to get a DRM-free executable; the Steam one cannot simply be flagged in place
 GUIDE_URL = "https://steamcommunity.com/sharedfiles/filedetails/?id=233222451"
 
@@ -106,11 +109,16 @@ def backup_path(exe: Path) -> Path:
     return exe.with_name(exe.name + BACKUP_SUFFIX)
 
 
+def kept_exe(data_dir: Path) -> Path:
+    return data_dir / KEPT_REL
+
+
 def status(install_dir: Path) -> str:
     return PATCHED if is_laa(game_exe(install_dir)) else UNPATCHED
 
 
 def _replace(data: bytes, dest: Path) -> None:
+    dest.parent.mkdir(parents=True, exist_ok=True)
     tmp = dest.with_name(dest.name + ".tmp")
     try:
         tmp.write_bytes(data)
@@ -120,18 +128,31 @@ def _replace(data: bytes, dest: Path) -> None:
         tmp.unlink(missing_ok=True)
 
 
-def patch(install_dir: Path, source_exe: Path) -> tuple[Path, bool]:
+def patch(install_dir: Path, source_exe: Path | None, data_dir: Path) -> tuple[Path, bool]:
     """Install `source_exe`, LAA-flagged if it is not yet (which needs it to be DRM-free).
 
-    Returns the path of the backup of the original, and whether the flag was set here.
+    The installed executable is kept in `data_dir` as well; without `source_exe` that kept
+    copy is installed. Returns the path of the backup of the original, and whether the flag
+    was set here.
     """
     exe = game_exe(install_dir)
     if is_laa(exe):
         raise LaaError("the game executable is already Large Address Aware")
-    source = source_exe.expanduser()
+    kept = kept_exe(data_dir)
+    if source_exe is None:
+        if not kept.is_file():
+            raise LaaError(
+                "no saved patched executable: give the path of a DRM-free or LAA-patched "
+                f"DAOrigins.exe, see {GUIDE_URL}"
+            )
+        source = kept
+    else:
+        source = source_exe.expanduser()
     if not source.is_file():
         raise LaaError(f"{source} not found")
     was_flagged = not is_laa(source)
+    if was_flagged and source == kept:
+        raise LaaError(f"{kept} is not LAA-patched: patch from a DRM-free executable again")
     try:
         data = source.read_bytes()
     except OSError as exc:
@@ -150,11 +171,20 @@ def patch(install_dir: Path, source_exe: Path) -> tuple[Path, bool]:
         _replace(data, exe)
     except OSError as exc:
         raise LaaError(f"cannot patch {exe}: {exc}") from exc
+    try:
+        if source != kept:
+            _replace(data, kept)
+        (data_dir / OFF_REL).unlink(missing_ok=True)
+    except OSError as exc:
+        raise LaaError(f"patched {exe}, but cannot keep a copy as {kept}: {exc}") from exc
     return backup, was_flagged
 
 
-def restore(install_dir: Path) -> Path:
-    """Put the original executable back. Returns its path."""
+def restore(install_dir: Path, data_dir: Path) -> Path:
+    """Put the original executable back. Returns its path.
+
+    Launching leaves the original alone from then on, until the patch is applied again.
+    """
     exe = resolve_case(install_dir, EXE_REL)
     backup = backup_path(exe)
     if not backup.is_file():
@@ -163,4 +193,30 @@ def restore(install_dir: Path) -> Path:
         os.replace(backup, exe)
     except OSError as exc:
         raise LaaError(f"cannot restore {exe}: {exc}") from exc
+    off = data_dir / OFF_REL
+    try:
+        off.parent.mkdir(parents=True, exist_ok=True)
+        off.touch()
+    except OSError as exc:
+        raise LaaError(f"restored {exe}, but cannot write {off}: {exc}") from exc
     return exe
+
+
+REAPPLIED = "LAA patch applied again (Steam had put back its executable)"
+MISSING = (
+    "The game executable is not LAA-patched: a heavily modded game can run out of memory"
+    " (t \u2192 LAA patch)"
+)
+
+
+def on_launch(install_dir: Path, data_dir: Path) -> str | None:
+    """Before the game starts: put the kept patched executable back if Steam replaced it.
+
+    Returns `REAPPLIED` or the `MISSING` warning, or None if nothing needs saying.
+    """
+    if is_laa(game_exe(install_dir)) or (data_dir / OFF_REL).exists():
+        return None
+    if not kept_exe(data_dir).is_file():
+        return MISSING
+    patch(install_dir, None, data_dir)
+    return REAPPLIED

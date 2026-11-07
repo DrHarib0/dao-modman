@@ -281,6 +281,47 @@ async def test_tools_menu_laa_patch_and_restore(
         await pilot.pause()
         assert not laa.is_laa(exe)
 
+        guides = len(opened)
+        await pilot.press("t")  # the patched executable was kept: no guide, no path needed
+        assert "again from the saved copy" in str(
+            app.screen.query_one(OptionList).get_option_at_index(0).prompt
+        )
+        await pilot.press("enter")
+        await pilot.pause()
+        assert laa.is_laa(exe) and len(opened) == guides
+
+
+async def test_launch_applies_the_kept_laa_patch_again(
+    tmp_path: Path, dirs: Dirs, user_dir: Path, monkeypatch
+) -> None:
+    from dao_modman.core import laa, launch
+
+    from .test_laa import make_exe
+
+    spawned: list[list[str]] = []
+    monkeypatch.setattr(launch, "WINDOWS", False)
+    monkeypatch.setattr(launch.shutil, "which", lambda name: name if name == "steam" else None)
+    monkeypatch.setattr(launch.subprocess, "Popen", lambda argv, **_: spawned.append(argv))
+    install_dir = tmp_path / "game"
+    exe = make_exe(install_dir / "bin_ship/DAOrigins.exe", large_address_aware=False)
+    steam = exe.read_bytes()
+
+    config = Config(
+        dirs=dirs, game_user_dir=user_dir, game_install_dir=install_dir, game_app_id="47810"
+    )
+    app = ModManApp(config)
+    async with app.run_test(size=(140, 40)) as pilot:
+        await pilot.press("l")  # no patched copy kept: a warning, the game starts anyway
+        assert [n.message for n in app._notifications][-2] == laa.MISSING
+        assert len(spawned) == 1 and not laa.is_laa(exe)
+
+        make_exe(tmp_path / "patched.exe", large_address_aware=True)
+        laa.patch(install_dir, tmp_path / "patched.exe", dirs.data)
+        exe.write_bytes(steam)  # a Steam update put its own executable back
+        await pilot.press("l")
+        assert [n.message for n in app._notifications][-2] == laa.REAPPLIED
+        assert len(spawned) == 2 and laa.is_laa(exe)
+
 
 async def test_official_addins_are_listed_and_can_be_hidden(
     tmp_path: Path, dirs: Dirs, user_dir: Path

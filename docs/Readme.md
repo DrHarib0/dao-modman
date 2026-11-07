@@ -426,8 +426,14 @@ browser and asks for the path of that `DAOrigins.exe`; on the command line it is
 `dao-modman laa patch --exe PATH`. A DRM-free executable without the flag is flagged on the
 way in (the file itself is left as it is); one with Steam's DRM is refused.
 The file is copied over `bin_ship/DAOrigins.exe` in the game's install dir, and the original
-is kept next to it as `DAOrigins.exe.pre-laa`; `laa restore` puts it back. Steam's "verify integrity of game files"
-also restores the original, after which the patch has to be applied again.
+is kept next to it as `DAOrigins.exe.pre-laa`; `laa restore` puts it back.
+
+The patched executable is also kept in the library, as
+`~/.local/share/dao-modman/laa/DAOrigins.exe`, because Steam puts its own executable back on
+updates and on "verify integrity of game files". Launching the game from dao-modman then
+applies the kept copy again; without one, it warns that the executable is not patched. Tools
+→ LAA and `dao-modman laa patch` without `--exe` apply the kept copy too. After `laa restore`
+(or Tools → Restore), launching leaves the original alone until the patch is applied again.
 
 ## Developer console
 

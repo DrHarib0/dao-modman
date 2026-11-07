@@ -51,6 +51,12 @@ def install_dir(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
+def data(tmp_path: Path) -> Path:
+    """dao-modman's data dir, where the patched executable is kept."""
+    return tmp_path / "data"
+
+
+@pytest.fixture
 def patched(tmp_path: Path) -> Path:
     return make_exe(tmp_path / "patched.exe", large_address_aware=True, marker=b"patched")
 
@@ -65,41 +71,44 @@ def test_is_laa(tmp_path: Path, install_dir: Path, patched: Path) -> None:
         laa.is_laa(tmp_path / "missing.exe")
 
 
-def test_patch_and_restore(install_dir: Path, patched: Path) -> None:
+def test_patch_and_restore(install_dir: Path, patched: Path, data: Path) -> None:
     exe = install_dir / "bin_ship/DAOrigins.exe"
     assert laa.status(install_dir) == laa.UNPATCHED
 
-    backup, was_flagged = laa.patch(install_dir, patched)
+    backup, was_flagged = laa.patch(install_dir, patched, data)
     assert not was_flagged
     assert laa.status(install_dir) == laa.PATCHED
     assert exe.read_bytes() == patched.read_bytes()
     assert backup.name == "DAOrigins.exe.pre-laa"
     assert backup.read_bytes().endswith(b"original")
     with pytest.raises(laa.LaaError, match="already"):
-        laa.patch(install_dir, patched)
+        laa.patch(install_dir, patched, data)
 
-    assert laa.restore(install_dir) == exe
+    assert laa.restore(install_dir, data) == exe
     assert exe.read_bytes().endswith(b"original")
     assert not backup.exists()
     with pytest.raises(laa.LaaError, match="no backup"):
-        laa.restore(install_dir)
+        laa.restore(install_dir, data)
 
 
-def test_patch_never_overwrites_an_existing_backup(install_dir: Path, patched: Path) -> None:
+def test_patch_never_overwrites_an_existing_backup(
+    install_dir: Path, patched: Path, data: Path
+) -> None:
     backup = install_dir / "bin_ship/DAOrigins.exe.pre-laa"
     backup.write_bytes(b"older backup")
-    laa.patch(install_dir, patched)
+    laa.patch(install_dir, patched, data)
     assert backup.read_bytes() == b"older backup"
 
 
-def test_patch_flags_a_drm_free_exe(tmp_path: Path, install_dir: Path) -> None:
+def test_patch_flags_a_drm_free_exe(tmp_path: Path, install_dir: Path, data: Path) -> None:
     exe = install_dir / "bin_ship/DAOrigins.exe"
     source = make_exe(tmp_path / "drm-free.exe", large_address_aware=False, marker=b"x" * 101)
     before = source.read_bytes()
 
-    backup, was_flagged = laa.patch(install_dir, source)
+    backup, was_flagged = laa.patch(install_dir, source, data)
     assert was_flagged and backup.read_bytes().endswith(b"original")
     assert source.read_bytes() == before  # the user's file is left alone
+    assert laa.kept_exe(data).read_bytes() == exe.read_bytes()  # the flagged copy is kept
     installed = exe.read_bytes()
     assert laa.is_laa(exe)
     assert struct.unpack_from("<I", installed, CHECKSUM_AT)[0] == checksum(installed)
@@ -107,27 +116,27 @@ def test_patch_flags_a_drm_free_exe(tmp_path: Path, install_dir: Path) -> None:
     assert all(0x80 + 22 <= i < 0x80 + 24 or CHECKSUM_AT <= i < CHECKSUM_AT + 4 for i in differing)
 
 
-def test_patch_rejects_unsuitable_sources(tmp_path: Path, install_dir: Path) -> None:
+def test_patch_rejects_unsuitable_sources(tmp_path: Path, install_dir: Path, data: Path) -> None:
     exe = install_dir / "bin_ship/DAOrigins.exe"
     before = exe.read_bytes()
     steam = make_exe(
         tmp_path / "steam.exe", large_address_aware=False, sections=(".text", ".rsrc", ".bind")
     )
     with pytest.raises(laa.LaaError, match="Steam's DRM"):
-        laa.patch(install_dir, steam)
+        laa.patch(install_dir, steam, data)
     truncated = tmp_path / "truncated.exe"
     truncated.write_bytes(steam.read_bytes()[:0x100])
     with pytest.raises(laa.LaaError, match="not a Windows executable"):
-        laa.patch(install_dir, truncated)
+        laa.patch(install_dir, truncated, data)
     assert exe.read_bytes() == before
     assert not (install_dir / "bin_ship/DAOrigins.exe.pre-laa").exists()
     with pytest.raises(laa.LaaError, match="not found"):
-        laa.patch(tmp_path / "nowhere", steam)
+        laa.patch(tmp_path / "nowhere", steam, data)
 
 
-def test_patch_with_missing_exe(tmp_path: Path, install_dir: Path) -> None:
+def test_patch_with_missing_exe(tmp_path: Path, install_dir: Path, data: Path) -> None:
     with pytest.raises(laa.LaaError, match="not found"):
-        laa.patch(install_dir, tmp_path / "missing.exe")
+        laa.patch(install_dir, tmp_path / "missing.exe", data)
     assert laa.status(install_dir) == laa.UNPATCHED
 
 
@@ -162,6 +171,10 @@ def test_cli(
     assert "already" in capsys.readouterr().err
     assert cli.main(["laa", "restore"]) == 0
     assert laa.status(install_dir) == laa.UNPATCHED
+    capsys.readouterr()
+    assert cli.main(["laa", "patch"]) == 0  # from the kept copy
+    assert "saved copy" in capsys.readouterr().out and laa.status(install_dir) == laa.PATCHED
+    assert cli.main(["laa", "restore"]) == 0
     drm_free = make_exe(tmp_path / "drm-free.exe", large_address_aware=False)
     capsys.readouterr()
     assert cli.main(["laa", "patch", "--exe", str(drm_free)]) == 0
@@ -170,3 +183,36 @@ def test_cli(
 
     config.game_install_dir = None
     assert cli.main(["laa", "status"]) == 1
+
+
+def test_the_patched_exe_is_kept_and_applied_again(
+    install_dir: Path, patched: Path, data: Path
+) -> None:
+    exe = install_dir / "bin_ship/DAOrigins.exe"
+    original = exe.read_bytes()
+    with pytest.raises(laa.LaaError, match="no saved patched executable"):
+        laa.patch(install_dir, None, data)
+    assert laa.on_launch(install_dir, data) == laa.MISSING  # a warning, nothing changed
+    assert exe.read_bytes() == original
+
+    laa.patch(install_dir, patched, data)
+    assert laa.kept_exe(data).read_bytes() == patched.read_bytes()
+    assert laa.on_launch(install_dir, data) is None  # patched: nothing to do
+    exe.write_bytes(original)  # Steam puts its own executable back
+    assert laa.on_launch(install_dir, data) == laa.REAPPLIED
+    assert exe.read_bytes() == patched.read_bytes()
+
+    laa.restore(install_dir, data)  # on purpose: launching leaves the original alone
+    assert laa.on_launch(install_dir, data) is None and exe.read_bytes() == original
+    laa.patch(install_dir, None, data)  # until the patch is applied again
+    exe.write_bytes(original)
+    assert laa.on_launch(install_dir, data) == laa.REAPPLIED
+
+
+def test_a_kept_copy_without_the_flag_is_refused(
+    tmp_path: Path, install_dir: Path, data: Path
+) -> None:
+    make_exe(laa.kept_exe(data), large_address_aware=False)  # replaced by hand
+    with pytest.raises(laa.LaaError, match="not LAA-patched"):
+        laa.on_launch(install_dir, data)
+    assert laa.status(install_dir) == laa.UNPATCHED
