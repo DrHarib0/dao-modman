@@ -34,6 +34,38 @@ def test_extract_zip(tmp_path: Path) -> None:
     assert archives.list_files(tmp_path / "out") == ["b/c.txt", "dir/a.txt"]
 
 
+def _backslashes_in_directory(archive: Path, names: list[str]) -> None:
+    """Rewrite the central directory's copy of `names` with backslashes, like some zippers.
+
+    The files' own headers keep the `/`, so the two copies of each name differ.
+    """
+    data = bytearray(archive.read_bytes())
+    directory = data.index(b"PK\x01\x02")  # the central directory follows all file data
+    for name in names:
+        at = data.index(name.encode(), directory)
+        data[at : at + len(name)] = name.replace("/", "\\").encode()
+    archive.write_bytes(bytes(data))
+
+
+def test_extract_zip_with_backslashes_only_in_the_directory(tmp_path: Path) -> None:
+    archive = make_zip(tmp_path / "a.zip", {"Armor/Textures/a.dds": "a", "Armor/b.mao": "b"})
+    _backslashes_in_directory(archive, ["Armor/Textures/a.dds", "Armor/b.mao"])
+    with zipfile.ZipFile(archive) as zf, pytest.raises(zipfile.BadZipFile):
+        zf.read(zf.infolist()[0])  # what zipfile alone makes of it
+    archives.extract(archive, tmp_path / "out")
+    assert archives.list_files(tmp_path / "out") == ["Armor/Textures/a.dds", "Armor/b.mao"]
+    assert (tmp_path / "out/Armor/Textures/a.dds").read_text() == "a"
+
+
+def test_extract_zip_still_refuses_names_that_differ_otherwise(tmp_path: Path) -> None:
+    archive = make_zip(tmp_path / "a.zip", {"Armor/a.dds": "a"})
+    data = archive.read_bytes()
+    directory = data.index(b"PK\x01\x02")
+    archive.write_bytes(data[:directory] + data[directory:].replace(b"Armor/a", b"Other\\a"))
+    with pytest.raises(archives.ArchiveError):
+        archives.extract(archive, tmp_path / "out")
+
+
 @pytest.mark.parametrize("name", ["../evil.txt", "/abs.txt", "a/../../evil.txt"])
 def test_extract_zip_rejects_traversal(tmp_path: Path, name: str) -> None:
     archive = tmp_path / "evil.zip"

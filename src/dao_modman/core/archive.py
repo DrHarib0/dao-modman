@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import os
 import shutil
 import subprocess
 import zipfile
 from pathlib import Path
+from typing import IO
 
 import py7zr
 
@@ -46,6 +48,23 @@ def _safe_name(name: str) -> str:
         raise ArchiveError(f"unsafe path in archive: {name!r}") from exc
 
 
+def _open_member(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> IO[bytes]:
+    """Open a zip member, also when its two copies of the name differ in separators only.
+
+    Some archives list a file as `dir\\file` in the directory but as `dir/file` in the
+    file's own header, which zipfile takes for a corrupt archive. The retry still has
+    zipfile compare the names, so no other difference is let through.
+    """
+    try:
+        return zf.open(info)
+    except zipfile.BadZipFile:
+        if "\\" not in info.orig_filename:
+            raise
+        fixed = copy.copy(info)
+        fixed.orig_filename = info.orig_filename.replace("\\", "/")
+        return zf.open(fixed)
+
+
 def _extract_zip(archive: Path, dest: Path) -> None:
     with zipfile.ZipFile(archive) as zf:
         for info in zf.infolist():
@@ -53,7 +72,7 @@ def _extract_zip(archive: Path, dest: Path) -> None:
                 continue
             target = dest / _safe_name(info.filename)
             target.parent.mkdir(parents=True, exist_ok=True)
-            with zf.open(info) as src, target.open("wb") as out:
+            with _open_member(zf, info) as src, target.open("wb") as out:
                 shutil.copyfileobj(src, out, _CHUNK)
 
 
